@@ -4,8 +4,15 @@
   <meta charset="UTF-8">
   <title>AI 疲勞駕駛監控系統</title>
   
-  <!-- 載入必要前端函式庫：TensorFlow, p5.js, ml5.js, MQTT.js -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.9.0/dist/tf.min.js"></script>
+  <!-- 1. 載入 TensorFlow.js Core & WebGL 後端 -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  
+  <!-- 2. 載入 Google 官方 Face Landmarks Detection 模型 -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
+  
+  <!-- 3. 載入 p5.js, ml5.js (僅用於神經網路分類) 與 MQTT.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
   <script src="https://unpkg.com/ml5@0.6.0/dist/ml5.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
@@ -32,7 +39,7 @@
       position: relative;
     }
     #webcam-video {
-      display: none; /* 隱藏原生 Video 標籤，透過 p5 canvas 繪製 */
+      display: none;
     }
   </style>
 </head>
@@ -41,14 +48,12 @@
   <h2>🚨 疲勞駕駛 AI 偵測系統</h2>
   
   <div id="canvas-container"></div>
-  <!-- 原生影音標籤 -->
   <video id="webcam-video" width="640" height="480" autoplay playsinline muted></video>
 
   <script>
-    // 💡 請替換為你真實的 GAS Web App (/exec) 網址
     const gasUrl = "https://script.google.com/macros/s/你的_DEPLOYMENT_ID/exec";
 
-    // --------- MQTT 設定 (Adafruit IO) ---------
+    // --------- MQTT 設定 ---------
     let client;
     let connectMQTT = false;
     let mqttUsername = "we1688";
@@ -56,9 +61,9 @@
     let mqttTopic = mqttUsername + "/feeds/alarm";
 
     let videoElement;
-    let facemesh;
+    let faceDetector;
+    let keypointsList = []; // 存放實時臉部關鍵點 (x, y)
     let predictLabel = "";
-    let predictions = [];
     let nn;
     
     let isCameraReady = false;
@@ -102,26 +107,30 @@
       let mqttOptions = { username: mqttUsername, password: mqttPassword };
       client = mqtt.connect("wss://io.adafruit.com:443", mqttOptions);
       client.on("connect", () => {
-        console.log("✅ 已成功連線 Adafruit IO MQTT！");
+        console.log("✅ 已連線 Adafruit IO MQTT！");
         connectMQTT = true;
       });
       client.on("error", (err) => console.error("❌ MQTT 錯誤:", err));
     }
 
+    // 轉換特徵點供 ml5 分類器使用 (抓取前 348 點 * 3 軸 = 1044 特徵值)
     function getCurrentData() {
       let inputData = [];
-      for (let i = 0; i < predictions.length; i++) {
-        for (let j = 0; j < predictions[i].scaledMesh.length; j++) {
-          for (let k = 0; k < predictions[i].scaledMesh[j].length; k++) {
-            inputData.push(predictions[i].scaledMesh[j][k]);
-          }
-        }
+      let count = Math.min(keypointsList.length, 348);
+      for (let i = 0; i < count; i++) {
+        inputData.push(keypointsList[i].x);
+        inputData.push(keypointsList[i].y);
+        inputData.push(keypointsList[i].z || 0);
+      }
+      // 補齊至 1044 長度
+      while (inputData.length < 1044) {
+        inputData.push(0);
       }
       return inputData;
     }
 
     function predictData() {
-      if (isModelReady && predictions.length > 0) {
+      if (isModelReady && keypointsList.length > 0) {
         let currentInputs = getCurrentData();
         if (currentInputs.length === 1044) {
           nn.classify([currentInputs], gotResults);
@@ -138,7 +147,7 @@
 
         if (connectMQTT && client) {
           client.publish(mqttTopic, predictLabel);
-          console.log("📡 已同步發送 MQTT: " + predictLabel);
+          console.log("📡 發送 MQTT: " + predictLabel);
         }
       }
       lastLabel = predictLabel;
@@ -152,51 +161,51 @@
     }
 
     function uploadModel() {
-      console.log("⏳ 連線至 GitHub 下載自訂 AI 模型...");
+      console.log("⏳ 下載 GitHub 自訂 AI 分類模型...");
       const modelInfo = {
         model: 'model.json',
         metadata: 'model_meta.json',
         weights: 'model.weights.bin',
       };
       nn.load(modelInfo, () => {
-        console.log('✅ GitHub AI 模型讀取完成！');
+        console.log('✅ GitHub AI 分類模型讀取完成！');
         isModelReady = true;
       });
     }
 
-    // 🎯 繪製 468 個臉部關鍵點（確保不受 tint 影響）
+    // 🎯 繪製臉部 468 點特徵網格
     function drawKeypoints() {  
-      if (predictions && predictions.length > 0) {
-        push(); // 隔離樣式設定
-        noStroke();
+      if (keypointsList && keypointsList.length > 0) {
+        push();
         fill(0, 255, 0); // 螢光亮綠色
-        
-        for (let i = 0; i < predictions.length; i++) {
-          const keypoints = predictions[i].scaledMesh;
-          for (let j = 0; j < keypoints.length; j++) {
-            const [x, y] = keypoints[j];
-            ellipse(x, y, 4, 4); // 繪製直徑 4px 的圓點
-          }
+        noStroke();
+        for (let i = 0; i < keypointsList.length; i++) {
+          let pt = keypointsList[i];
+          ellipse(pt.x, pt.y, 3, 3);
         }
-        pop(); // 恢復原樣式
+        pop();
       }
     }
 
-    function faceModelReady() {
-      console.log("✅ FaceMesh 模型讀取完成！開始監聽臉部...");
-      isFaceMeshReady = true;
-      facemesh.on("predict", (results) => {
-        predictions = results;
-        if (predictions.length > 0) {
-          // 在 Console 印出除錯訊息，確認有抓到臉
-          // console.log("👤 抓到臉部數據，關鍵點數:", predictions[0].scaledMesh.length);
-          predictData();
+    // 🚀 使用 TensorFlow 官方 Detector 偵測臉部
+    async function renderFaceMesh() {
+      if (isCameraReady && faceDetector && videoElement.readyState >= 2) {
+        try {
+          const faces = await faceDetector.estimateFaces(videoElement, { flipHorizontal: false });
+          if (faces.length > 0) {
+            keypointsList = faces[0].keypoints; // 取得 468/478 特徵點
+            predictData();
+          } else {
+            keypointsList = [];
+          }
+        } catch (e) {
+          console.error("偵測異常:", e);
         }
-      });
-      uploadModel();
+      }
+      requestAnimationFrame(renderFaceMesh); // 持續循環高幀率偵測
     }
 
-    async function initCamera() {
+    async function initCameraAndFaceMesh() {
       videoElement = document.getElementById('webcam-video');
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -205,15 +214,28 @@
         });
         videoElement.srcObject = stream;
         
-        videoElement.onloadedmetadata = () => {
-          console.log("📷 鏡頭畫面解析度已確認，啟動 FaceMesh 模型...");
+        videoElement.onloadedmetadata = async () => {
+          console.log("📷 攝影機啟動成功！載入 Google 官方 FaceMesh 模型...");
           isCameraReady = true;
-          // 確保鏡頭就緒後才初始化 ml5.facemesh
-          facemesh = ml5.facemesh(videoElement, faceModelReady);
+
+          // 建立 Google 官方 FaceMesh 檢測器
+          const model = faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh;
+          const detectorConfig = {
+            runtime: 'tfjs',
+            refineLandmarks: false,
+            maxFaces: 1
+          };
+          faceDetector = await faceLandmarksDetection.createDetector(model, detectorConfig);
+          
+          console.log("✅ Google 官方 FaceMesh 載入完成！");
+          isFaceMeshReady = true;
+          
+          uploadModel(); // 下載分類模型
+          renderFaceMesh(); // 啟動偵測迴圈
         };
       } catch (err) {
-        console.error("❌ 無法取得攝影機畫面: ", err);
-        alert("⚠️ 請授權攝影機使用權限！");
+        console.error("❌ 無法取得攝影機權限: ", err);
+        alert("⚠️ 請授權攝影機存取！");
       }
     }
 
@@ -233,7 +255,7 @@
       nn = ml5.neuralNetwork(options);
 
       mqttSetup();
-      initCamera(); // 正式喚起鏡頭
+      initCameraAndFaceMesh();
     }
 
     function draw() {
@@ -244,10 +266,10 @@
         drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
       }
 
-      // 2. 繪製綠色網格關鍵點
+      // 2. 繪製螢光綠色網格
       drawKeypoints();   
       
-      // 3. 繪製文字與狀態指示
+      // 3. 顯示 UI 文字
       textAlign(CENTER, CENTER);
       if (predictLabel === "打瞌睡") {
         fill(255, 50, 50);
@@ -256,11 +278,11 @@
         text("⚠️ 請保持清醒！", width / 2, height / 3);
       } else if (!isFaceMeshReady || !isModelReady) {
         fill(0, 0, 0, 180);
-        rect(0, 0, width, height); // 半透明遮罩
+        rect(0, 0, width, height);
         
         fill(255, 255, 0);
         textSize(28);
-        let msg = !isFaceMeshReady ? "⏳ FaceMesh 人臉模型載入中..." : "⏳ AI 分類模型下載中...";
+        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 模型下載中...";
         text(msg, width / 2, height / 2);
       }
     }
