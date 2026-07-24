@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)10:43</title>
+  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)10:57</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -70,19 +70,40 @@
     let userLat = "無";
     let userLng = "無";
 
-    function updatePhoneLocation() {
-      if ("geolocation" in navigator) {
+   function updatePhoneLocation() {
+  if ("geolocation" in navigator) {
+    // 優先嘗試獲取精準 GPS 座標
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        userLat = position.coords.latitude.toFixed(6);
+        userLng = position.coords.longitude.toFixed(6);
+        console.log(`📱 GPS 定位成功: ${userLat}, ${userLng}`);
+      },
+      (error) => {
+        console.warn("⚠️ 第一次定位失敗，嘗試低精度備用定位...", error.message);
+        // 若失敗，調低精確度重新獲取一次
         navigator.geolocation.getCurrentPosition(
-          (position) => {
-            userLat = position.coords.latitude.toFixed(6);
-            userLng = position.coords.longitude.toFixed(6);
-            console.log(`📱 GPS 定位成功: ${userLat}, ${userLng}`);
+          (pos) => {
+            userLat = pos.coords.latitude.toFixed(6);
+            userLng = pos.coords.longitude.toFixed(6);
+            console.log(`📱 備用 GPS 定位成功: ${userLat}, ${userLng}`);
           },
-          (error) => console.warn("⚠️ 定位失敗: ", error.message),
-          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+          (err2) => {
+            console.error("❌ GPS 定位徹底失敗:", err2.message);
+            // 提示使用者檢查手機定位設定
+            if (err2.code === err2.PERMISSION_DENIED) {
+              alert("⚠️ 系統無法取得 GPS 定位：請至手機設定中允許瀏覽器存取「位置資訊」。");
+            }
+          },
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
         );
-      }
-    }
+      },
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    );
+  } else {
+    console.error("❌ 你的瀏覽器不支援 Geolocation 定位功能");
+  }
+}
 
     function sendToGAS(status) {
       if (!gasUrl || gasUrl.includes("你的_DEPLOYMENT_ID")) return;
