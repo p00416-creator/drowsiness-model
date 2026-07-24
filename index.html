@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版-10:30)</title>
+  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)10:43</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -97,16 +97,23 @@
       .catch(err => console.error("❌ 同步 GAS 失敗:", err));
     }
 
-    // 將特徵點轉換為 1044 長度的純數值陣列
+    // 嚴格將特徵點轉為長度為 1044 的數值陣列，避免帶入 NaN
     function getCleanInputData() {
       let inputData = [];
       let count = Math.min(keypointsList.length, 348);
+      
       for (let i = 0; i < count; i++) {
         let pt = keypointsList[i];
-        inputData.push(Number(pt.x) || 0);
-        inputData.push(Number(pt.y) || 0);
-        inputData.push(Number(pt.z) || 0);
+        let x = (pt && typeof pt.x === 'number' && !isNaN(pt.x)) ? pt.x : 0;
+        let y = (pt && typeof pt.y === 'number' && !isNaN(pt.y)) ? pt.y : 0;
+        let z = (pt && typeof pt.z === 'number' && !isNaN(pt.z)) ? pt.z : 0;
+        
+        inputData.push(x);
+        inputData.push(y);
+        inputData.push(z);
       }
+      
+      // 補齊至 1044 長度
       while (inputData.length < 1044) {
         inputData.push(0);
       }
@@ -119,11 +126,11 @@
         let inputs = getCleanInputData();
         
         try {
-          // ml5 支持直接傳入陣列進行分類
+          // ml5 神經網路推論
           nn.classify(inputs, gotResults);
         } catch (err) {
           console.error("❌ 推論觸發失敗:", err);
-          isPredicting = false; // 發生例外時強制解鎖
+          isPredicting = false; // 強制解鎖
         }
       }
     }
@@ -138,24 +145,23 @@
     }
 
     function gotResults(error, results) {
-      isPredicting = false; // 推論完成，解鎖允許下一次推論
+      isPredicting = false; // 解除推論鎖定
       
       if (error) {
-        console.error("❌ ml5 推論錯誤:", error);
+        console.error("❌ ml5 推論過程報錯:", error);
         return;
       }
       
       if (results && results.length > 0) {
+        // 順利取得結果
         predictLabel = String(results[0].label).trim();
         confidenceVal = (results[0].confidence * 100).toFixed(0);
         checkStatus();
-      } else {
-        console.warn("⚠️ ml5 未回傳無效結果");
       }
     }
 
     function uploadModel() {
-      console.log("⏳ 開始載入 AI 分類模型檔...");
+      console.log("⏳ 開始下載並載入 AI 分類模型檔...");
       const modelInfo = {
         model: 'model.json',
         metadata: 'model_meta.json',
@@ -163,7 +169,7 @@
       };
       
       nn.load(modelInfo, () => {
-        console.log('✅ AI 分類模型載入完成，準備推論！');
+        console.log('✅ AI 分類模型已成功載入！');
         isModelReady = true;
       });
     }
@@ -185,9 +191,12 @@
       if (isCameraReady && faceDetector && videoElement.readyState >= 2) {
         try {
           const faces = await faceDetector.estimateFaces(videoElement, { flipHorizontal: false });
+          
           if (faces && faces.length > 0) {
-            keypointsList = faces[0].keypoints;
-            predictData(); // 嘗試進行 AI 推論
+            keypointsList = faces[0].keypoints || [];
+            if (keypointsList.length > 0) {
+              predictData(); // 觸發 AI 推論
+            }
           } else {
             keypointsList = [];
             predictLabel = "未偵測到人臉";
@@ -244,6 +253,7 @@
 
       updatePhoneLocation();
 
+      // 初始化 ml5 神經網路
       const options = {
         inputs: 1044,
         outputs: 2,
@@ -263,7 +273,7 @@
         drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
       }
 
-      // 2. 繪製綠色特徵點
+      // 2. 繪製綠色網格
       drawKeypoints();   
       
       // 3. 頂部遮罩
@@ -272,14 +282,14 @@
       rect(0, 0, width, 70);
       pop();
 
-      // 4. 文字顯示
+      // 4. 文字狀態顯示
       push();
       textAlign(CENTER, CENTER);
 
       if (!isFaceMeshReady || !isModelReady) {
         fill(255, 255, 0);
         textSize(22);
-        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 模型下載中...";
+        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 分類模型下載中...";
         text(msg, width / 2, 35);
       } else if (predictLabel === "打瞌睡") {
         fill(255, 50, 50);
