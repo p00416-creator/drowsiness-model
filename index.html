@@ -1,7 +1,8 @@
 <!DOCTYPE html>
+<html lang="zh-TW">
 <head>
- <meta charset="UTF-8">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)3</title>
+  <meta charset="UTF-8">
+  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)4</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -48,8 +49,8 @@
   <video id="webcam-video" width="640" height="480" autoplay playsinline muted></video>
 
   <script>
-    // 🔗 貼上你的 GAS 部署網址 (需包含 /exec)
-    const gasUrl = "https://script.google.com/macros/s/AKfycbzR-0dO8nyrTmckOUljWXDD8whv9hJMPxmgRJaBzqZBUgR5zPt52Og26LgbGh1vCjSCZQ/exec";
+    // 🔗 請確認這是你的最新 GAS 部署網址 (需包含 /exec)
+    const gasUrl = "https://script.google.com/macros/s/AKfycbyGFrd3VqxAZ6vRGvWF-s4mzrSKas1gM0af09G6-_TXUEvJdNFUKYKM_jBDi8Eb1HHs/exec";
 
     let videoElement;
     let faceDetector;
@@ -76,7 +77,7 @@
           (position) => {
             userLat = position.coords.latitude.toFixed(6);
             userLng = position.coords.longitude.toFixed(6);
-            console.log(`?? GPS 定位成功: ${userLat}, ${userLng}`);
+            console.log(`📱 GPS 定位成功: ${userLat}, ${userLng}`);
           },
           (error) => console.warn("⚠️ 定位失敗: ", error.message),
           { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
@@ -93,10 +94,11 @@
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify(payloadData)
       })
-      .then(() => console.log(`狀態 [${status}] 已同步至 Google 試算表 (GAS)！`))
-      .catch(err => console.error("? 同步 GAS 失敗:", err));
+      .then(() => console.log(`✅ 狀態 [${status}] 已同步至 Google 試算表 (GAS)！`))
+      .catch(err => console.error("❌ 同步 GAS 失敗:", err));
     }
 
+    // 將 FaceMesh 的 keypoints 格式化為長度為 1044 的數值陣列
     function getCleanInputData() {
       let inputData = [];
       let count = Math.min(keypointsList.length, 348);
@@ -106,6 +108,7 @@
         inputData.push(typeof pt.y === 'number' ? pt.y : 0);
         inputData.push(typeof pt.z === 'number' ? pt.z : 0);
       }
+      // 補齊位數至 1044
       while (inputData.length < 1044) {
         inputData.push(0);
       }
@@ -116,7 +119,13 @@
       if (isModelReady && keypointsList.length > 0 && !isPredicting) {
         isPredicting = true;
         let inputs = getCleanInputData();
-        nn.classify(inputs, gotResults);
+        
+        try {
+          nn.classify(inputs, gotResults);
+        } catch(e) {
+          console.error("❌ 推論觸發異常:", e);
+          isPredicting = false;
+        }
       }
     }
 
@@ -132,7 +141,7 @@
     function gotResults(error, results) {
       isPredicting = false;
       if (error) {
-        console.error("❌分類推論失敗:", error);
+        console.error("❌ ml5 分類錯誤:", error);
         return;
       }
       if (results && results.length > 0) {
@@ -143,15 +152,17 @@
     }
 
     function uploadModel() {
-      console.log("⏳ 下載 AI 分類模型...");
+      console.log("⏳ 正在嘗試載入 AI 分類模型檔案...");
+      
+      // 使用相對於根目錄的路徑
       const modelInfo = {
-        model: 'model.json',
-        metadata: 'model_meta.json',
-        weights: 'model.weights.bin',
+        model: './model.json',
+        metadata: './model_meta.json',
+        weights: './model.weights.bin',
       };
       
       nn.load(modelInfo, () => {
-        console.log('✅ AI 分類模型載入完成！');
+        console.log('🎉 ✅ AI 分類模型 successfully 載入完成！');
         isModelReady = true;
       });
     }
@@ -183,7 +194,7 @@
             checkStatus();
           }
         } catch (e) {
-          console.warn("⚠️ 偵測遇障:", e);
+          console.warn("⚠️ FaceMesh 偵測遇障:", e);
         }
       }
       requestAnimationFrame(renderFaceMesh);
@@ -232,6 +243,7 @@
 
       updatePhoneLocation();
 
+      // 初始化 ml5 神經網路
       const options = {
         inputs: 1044,
         outputs: 2,
@@ -263,7 +275,7 @@
       if (!isFaceMeshReady || !isModelReady) {
         fill(255, 255, 0);
         textSize(22);
-        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 分類模型下載中...";
+        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 分類模型下載中 (請檢查 Console)...";
         text(msg, width / 2, 35);
       } else if (predictLabel === "打瞌睡") {
         fill(255, 50, 50);
