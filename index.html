@@ -40,8 +40,8 @@
   <div id="canvas-container"></div>
 
   <script>
-    // 💡 請將此處替換為你真實的 GAS Web App (/exec) 網址
-    const gasUrl = "https://script.google.com/macros/s/AKfycbyGFrd3VqxAZ6vRGvWF-s4mzrSKas1gM0af09G6-_TXUEvJdNFUKYKM_jBDi8Eb1HHs/exec";
+    // 💡 請替換為你真實的 GAS Web App (/exec) 網址
+    const gasUrl = "https://script.google.com/macros/s/你的_DEPLOYMENT_ID/exec";
 
     // --------- MQTT 設定 (Adafruit IO) ---------
     let client;
@@ -55,7 +55,10 @@
     let predictLabel = "";
     let predictions = [];
     let nn;
-    let loading = false;
+    
+    let isFaceMeshReady = false;
+    let isModelReady = false;
+
     let lastLabel = "";
     let videoSizeW = 640;
     let videoSizeH = 480;
@@ -112,7 +115,7 @@
     }
 
     function predictData() {
-      if (predictions.length > 0) {
+      if (isModelReady && predictions.length > 0) {
         let currentInputs = getCurrentData();
         if (currentInputs.length === 1044) {
           nn.classify([currentInputs], gotResults);
@@ -151,30 +154,33 @@
       };
       nn.load(modelInfo, () => {
         console.log('✅ GitHub AI 模型讀取完成！');
-        loading = false;
+        isModelReady = true;
       });
-      loading = true;
     }
 
+    // 繪製 468 個臉部關鍵點
     function drawKeypoints() {  
-      for (let i = 0; i < predictions.length; i += 1) {
-        const keypoints = predictions[i].scaledMesh;
-        for (let j = 0; j < keypoints.length; j += 1) {
-          const [x, y] = keypoints[j];
-          if (x <= videoSizeW && x >= 0 && y <= (videoSizeH - 5) && y >= 0) {
-            fill(100, 255, 100);
-            noStroke();
-            ellipse(x, y, 3, 3);
+      if (predictions.length > 0) {
+        for (let i = 0; i < predictions.length; i += 1) {
+          const keypoints = predictions[i].scaledMesh;
+          fill(100, 255, 100);
+          noStroke();
+          for (let j = 0; j < keypoints.length; j += 1) {
+            const [x, y] = keypoints[j];
+            if (x <= videoSizeW && x >= 0 && y <= (videoSizeH - 5) && y >= 0) {
+              ellipse(x, y, 3, 3);
+            }
           }
         }
       }
     }
 
     function faceModelReady() {
-      console.log("✅ FaceMesh 模型讀取完成");
+      console.log("✅ FaceMesh 模型讀取完成，開始監聽臉部特徵點...");
+      isFaceMeshReady = true;
       facemesh.on("predict", (results) => {
         predictions = results;
-        if (predictions.length > 0 && !loading) predictData();
+        predictData();
       });
       uploadModel();
     }
@@ -186,7 +192,10 @@
       updatePhoneLocation();
 
       // 原生喚起鏡頭
-      video = createCapture(VIDEO);
+      video = createCapture(VIDEO, () => {
+        console.log("📷 鏡頭影像流準備就緒，開始載入 FaceMesh...");
+        facemesh = ml5.facemesh(video, faceModelReady);
+      });
       video.size(videoSizeW, videoSizeH);
       video.elt.setAttribute('playsinline', '');
       video.hide();  
@@ -198,9 +207,6 @@
         debug: false
       };
       nn = ml5.neuralNetwork(options);
-      
-      loading = true;
-      facemesh = ml5.facemesh(video, faceModelReady);
 
       mqttSetup();
     }
@@ -212,6 +218,7 @@
         image(video, 0, 0, videoSizeW, videoSizeH);
       }
 
+      // 繪製網格
       drawKeypoints();   
       
       textAlign(CENTER, CENTER);
@@ -222,11 +229,12 @@
         textStyle(BOLD);
         text("⚠️ 請保持清醒！", width / 2, height / 3);
         tint(255, 50, 50);
-      } else if (loading) {
+      } else if (!isFaceMeshReady || !isModelReady) {
         fill(255, 255, 0);
-        textSize(36);
-        text("系統與 AI 模型讀取中...", width / 2, height / 3);
-        tint(100, 100, 100);    
+        textSize(32);
+        let msg = !isFaceMeshReady ? "FaceMesh 模型載入中..." : "AI 模型下載中...";
+        text(msg, width / 2, height / 3);
+        tint(150);    
       } else {
         tint(255);    
       } 
