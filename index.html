@@ -4,15 +4,16 @@
   <meta charset="UTF-8">
   <title>AI 疲勞駕駛監控系統</title>
   
-  <!-- 1. 載入 TensorFlow.js Core & WebGL 後端 -->
+  <!-- 1. 載入 TensorFlow.js Core & WebGL & CPU 後端 (確保電腦與手機相容) -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu"></script>
   
   <!-- 2. 載入 Google 官方 Face Landmarks Detection 模型 -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
   
-  <!-- 3. 載入 p5.js, ml5.js (僅用於神經網路分類) 與 MQTT.js -->
+  <!-- 3. 載入 p5.js, ml5.js 與 MQTT.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
   <script src="https://unpkg.com/ml5@0.6.0/dist/ml5.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
@@ -62,7 +63,7 @@
 
     let videoElement;
     let faceDetector;
-    let keypointsList = []; // 存放實時臉部關鍵點 (x, y)
+    let keypointsList = []; 
     let predictLabel = "";
     let nn;
     
@@ -113,7 +114,6 @@
       client.on("error", (err) => console.error("❌ MQTT 錯誤:", err));
     }
 
-    // 轉換特徵點供 ml5 分類器使用 (抓取前 348 點 * 3 軸 = 1044 特徵值)
     function getCurrentData() {
       let inputData = [];
       let count = Math.min(keypointsList.length, 348);
@@ -122,7 +122,6 @@
         inputData.push(keypointsList[i].y);
         inputData.push(keypointsList[i].z || 0);
       }
-      // 補齊至 1044 長度
       while (inputData.length < 1044) {
         inputData.push(0);
       }
@@ -173,11 +172,11 @@
       });
     }
 
-    // 🎯 繪製臉部 468 點特徵網格
+    // 🎯 繪製綠色特徵點
     function drawKeypoints() {  
       if (keypointsList && keypointsList.length > 0) {
         push();
-        fill(0, 255, 0); // 螢光亮綠色
+        fill(0, 255, 0); // 螢光綠
         noStroke();
         for (let i = 0; i < keypointsList.length; i++) {
           let pt = keypointsList[i];
@@ -187,26 +186,38 @@
       }
     }
 
-    // 🚀 使用 TensorFlow 官方 Detector 偵測臉部
+    // 🚀 高效能繪製與臉部檢測
     async function renderFaceMesh() {
       if (isCameraReady && faceDetector && videoElement.readyState >= 2) {
         try {
           const faces = await faceDetector.estimateFaces(videoElement, { flipHorizontal: false });
           if (faces.length > 0) {
-            keypointsList = faces[0].keypoints; // 取得 468/478 特徵點
+            keypointsList = faces[0].keypoints;
             predictData();
           } else {
             keypointsList = [];
           }
         } catch (e) {
-          console.error("偵測異常:", e);
+          console.warn("⚠️ 偵測遇障，嘗試重設畫面:", e);
         }
       }
-      requestAnimationFrame(renderFaceMesh); // 持續循環高幀率偵測
+      requestAnimationFrame(renderFaceMesh);
     }
 
+    // 💻 硬體相容性診斷與初始化
     async function initCameraAndFaceMesh() {
       videoElement = document.getElementById('webcam-video');
+
+      // 1. 強制設定 TensorFlow 後端渲染防線 (避免電腦 GPU 驅動崩潰)
+      try {
+        await tf.setBackend('webgl');
+        console.log("⚡ 使用 WebGL 硬體加速");
+      } catch (e) {
+        console.warn("⚠️ 電腦 WebGL 初始化失敗，切換至 CPU 模式");
+        await tf.setBackend('cpu');
+      }
+
+      // 2. 存取攝影機
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: videoSizeW, height: videoSizeH },
@@ -215,23 +226,22 @@
         videoElement.srcObject = stream;
         
         videoElement.onloadedmetadata = async () => {
-          console.log("📷 攝影機啟動成功！載入 Google 官方 FaceMesh 模型...");
+          console.log("📷 攝影機啟動成功！載入 FaceMesh 模型...");
           isCameraReady = true;
 
-          // 建立 Google 官方 FaceMesh 檢測器
           const model = faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh;
           const detectorConfig = {
             runtime: 'tfjs',
             refineLandmarks: false,
             maxFaces: 1
           };
-          faceDetector = await faceLandmarksDetection.createDetector(model, detectorConfig);
           
-          console.log("✅ Google 官方 FaceMesh 載入完成！");
+          faceDetector = await faceLandmarksDetection.createDetector(model, detectorConfig);
+          console.log("✅ FaceMesh 模型讀取完畢！");
           isFaceMeshReady = true;
           
-          uploadModel(); // 下載分類模型
-          renderFaceMesh(); // 啟動偵測迴圈
+          uploadModel(); 
+          renderFaceMesh(); 
         };
       } catch (err) {
         console.error("❌ 無法取得攝影機權限: ", err);
@@ -245,7 +255,6 @@
 
       updatePhoneLocation();
 
-      // 初始化 ml5 神經網路
       const options = {
         inputs: 1044,
         outputs: 2,
@@ -261,15 +270,12 @@
     function draw() {
       background(0);
 
-      // 1. 繪製攝影機畫面
       if (isCameraReady && videoElement) {
         drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
       }
 
-      // 2. 繪製螢光綠色網格
       drawKeypoints();   
       
-      // 3. 顯示 UI 文字
       textAlign(CENTER, CENTER);
       if (predictLabel === "打瞌睡") {
         fill(255, 50, 50);
