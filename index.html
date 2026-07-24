@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>AI 疲勞駕駛監控系統</title>
+  
+  <!-- 載入必要前端函式庫：TensorFlow, p5.js, ml5.js, MQTT.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.9.0/dist/tf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+  <script src="https://unpkg.com/ml5@0.6.0/dist/ml5.min.js"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: #121212;
+      color: white;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    h2 { margin: 10px 0 15px 0; }
+    #canvas-container {
+      border: 3px solid #333;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>🚨 疲勞駕駛 AI 偵測系統</h2>
+  
+  <div id="canvas-container"></div>
+
+  <script>
+    // 💡 請將此處替換為你真實的 GAS Web App (/exec) 網址
+    const gasUrl = "https://script.google.com/macros/s/AKfycbyGFrd3VqxAZ6vRGvWF-s4mzrSKas1gM0af09G6-_TXUEvJdNFUKYKM_jBDi8Eb1HHs/exec";
+
+    // --------- MQTT 設定 (Adafruit IO) ---------
+    let client;
+    let connectMQTT = false;
+    let mqttUsername = "we1688";
+    let mqttPassword = "aio_QPfP05UOUn7pTKEh6Qjp9EIPQ9Mh";
+    let mqttTopic = mqttUsername + "/feeds/alarm";
+
+    let video;
+    let facemesh;
+    let predictLabel = "";
+    let predictions = [];
+    let nn;
+    let loading = false;
+    let lastLabel = "";
+    let videoSizeW = 640;
+    let videoSizeH = 480;
+
+    let userLat = "無";
+    let userLng = "無";
+
+    function updatePhoneLocation() {
+      if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            userLat = position.coords.latitude.toFixed(6);
+            userLng = position.coords.longitude.toFixed(6);
+            console.log(`📱 GPS 定位成功: ${userLat}, ${userLng}`);
+          },
+          (error) => console.warn("⚠️ 定位失敗: ", error.message),
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        );
+      }
+    }
+
+    function sendToGAS(status) {
+      if (!gasUrl || gasUrl.includes("你的_DEPLOYMENT_ID")) return;
+      let payloadData = { status: status, lat: userLat, lng: userLng };
+      fetch(gasUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify(payloadData)
+      })
+      .then(() => console.log(`✅ 狀態 [${status}] 已同步至 GAS！`))
+      .catch(err => console.error("❌ 同步 GAS 失敗:", err));
+    }
+
+    function mqttSetup() {
+      let mqttOptions = { username: mqttUsername, password: mqttPassword };
+      client = mqtt.connect("wss://io.adafruit.com:443", mqttOptions);
+      client.on("connect", () => {
+        console.log("✅ 已成功連線 Adafruit IO MQTT！");
+        connectMQTT = true;
+      });
+      client.on("error", (err) => console.error("❌ MQTT 錯誤:", err));
+    }
+
+    function getCurrentData() {
+      let inputData = [];
+      for (let i = 0; i < predictions.length; i++) {
+        for (let j = 0; j < predictions[i].scaledMesh.length; j++) {
+          for (let k = 0; k < predictions[i].scaledMesh[j].length; k++) {
+            inputData.push(predictions[i].scaledMesh[j][k]);
+          }
+        }
+      }
+      return inputData;
+    }
+
+    function predictData() {
+      if (predictions.length > 0) {
+        let currentInputs = getCurrentData();
+        if (currentInputs.length === 1044) {
+          nn.classify([currentInputs], gotResults);
+        }
+      }
+    }
+
+    function checkStatus(){
+      if(predictLabel !== lastLabel){
+        console.log("🔄 狀態變更: " + predictLabel);
+        if (predictLabel === "打瞌睡") updatePhoneLocation();
+        
+        sendToGAS(predictLabel);
+
+        if (connectMQTT && client) {
+          client.publish(mqttTopic, predictLabel);
+          console.log("📡 已同步發送 MQTT: " + predictLabel);
+        }
+      }
+      lastLabel = predictLabel;
+    }
+
+    function gotResults(error, results) {
+      if (!error && results && results.length > 0) {
+        predictLabel = results[0].label;
+        checkStatus();
+      }
+    }
+
+    function uploadModel() {
+      console.log("⏳ 連線至 GitHub 下載自訂 AI 模型...");
+      const modelInfo = {
+        model: 'model.json',
+        metadata: 'model_meta.json',
+        weights: 'model.weights.bin',
+      };
+      nn.load(modelInfo, () => {
+        console.log('✅ GitHub AI 模型讀取完成！');
+        loading = false;
+      });
+      loading = true;
+    }
+
+    function drawKeypoints() {  
+      for (let i = 0; i < predictions.length; i += 1) {
+        const keypoints = predictions[i].scaledMesh;
+        for (let j = 0; j < keypoints.length; j += 1) {
+          const [x, y] = keypoints[j];
+          if (x <= videoSizeW && x >= 0 && y <= (videoSizeH - 5) && y >= 0) {
+            fill(100, 255, 100);
+            noStroke();
+            ellipse(x, y, 3, 3);
+          }
+        }
+      }
+    }
+
+    function faceModelReady() {
+      console.log("✅ FaceMesh 模型讀取完成");
+      facemesh.on("predict", (results) => {
+        predictions = results;
+        if (predictions.length > 0 && !loading) predictData();
+      });
+      uploadModel();
+    }
+
+    function setup() {
+      let canvas = createCanvas(videoSizeW, videoSizeH);
+      canvas.parent('canvas-container');
+
+      updatePhoneLocation();
+
+      // 原生喚起鏡頭
+      video = createCapture(VIDEO);
+      video.size(videoSizeW, videoSizeH);
+      video.elt.setAttribute('playsinline', '');
+      video.hide();  
+
+      const options = {
+        inputs: 1044,
+        outputs: 2,
+        task: 'classification',
+        debug: false
+      };
+      nn = ml5.neuralNetwork(options);
+      
+      loading = true;
+      facemesh = ml5.facemesh(video, faceModelReady);
+
+      mqttSetup();
+    }
+
+    function draw() {
+      background(0);
+
+      if (video) {
+        image(video, 0, 0, videoSizeW, videoSizeH);
+      }
+
+      drawKeypoints();   
+      
+      textAlign(CENTER, CENTER);
+      
+      if (predictLabel === "打瞌睡") {
+        fill(255, 50, 50);
+        textSize(60);
+        textStyle(BOLD);
+        text("⚠️ 請保持清醒！", width / 2, height / 3);
+        tint(255, 50, 50);
+      } else if (loading) {
+        fill(255, 255, 0);
+        textSize(36);
+        text("系統與 AI 模型讀取中...", width / 2, height / 3);
+        tint(100, 100, 100);    
+      } else {
+        tint(255);    
+      } 
+    }
+  </script>
+</body>
+</html>
