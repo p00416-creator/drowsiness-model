@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)16:05</title>
+  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)16:14</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -272,7 +272,8 @@ function uploadModel() {
           } else {
             keypointsList = [];
             confidenceVal = "0";
-            checkStatus("未偵測到人臉");
+           // checkStatus("未偵測到人臉");
+            predictLabel="未偵測到人臉";
           }
         } catch (e) {
           console.warn("⚠️ FaceMesh 畫面解析異常:", e);
@@ -400,11 +401,11 @@ function uploadModel() {
         fill(180, 180, 180);
         textSize(20);
         text("👤 請將臉部對準鏡頭", width / 2, 30);
-      } else if (predictLabel == "載入中...") {
+      } /*else if (predictLabel == "載入中...") {
         fill(255, 220, 0);
         textSize(18);
         text("⏳ AI 分析推論中...", width / 2, 30);
-      } else {
+      } */else {
         fill(50, 230, 120);
         textSize(22);
         textStyle(BOLD);
