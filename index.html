@@ -2,8 +2,8 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)13:30</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)13:33</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -30,22 +30,30 @@
       align-items: center;
       justify-content: center;
       min-height: 100vh;
+      overflow: hidden;
     }
-    h2 { margin: 10px 0 15px 0; font-size: 1.4rem; text-align: center; }
+    h2 { 
+      margin: 8px 0; 
+      font-size: 1.2rem; 
+      text-align: center; 
+      color: #e0e0e0;
+    }
     #canvas-container {
-      border: 3px solid #333;
+      border: 2px solid #444;
       border-radius: 12px;
       overflow: hidden;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.8);
       position: relative;
-      max-width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
     #webcam-video { display: none; }
   </style>
 </head>
 <body>
 
-  <h2>🚨 疲勞駕駛 AI 偵測系統</h2>
+  <h2>🚨 AI 疲勞駕駛即時監控</h2>
   
   <div id="canvas-container"></div>
   <video id="webcam-video" width="640" height="480" autoplay playsinline muted></video>
@@ -72,10 +80,44 @@
     let userLat = "無";
     let userLng = "無";
 
-    // 🎯 防抖動與連續狀態確認機制
+    // 🎯 防抖動與請求節流機制
     let pendingLabel = "";
     let labelCount = 0;
-    const CONFIRM_THRESHOLD = 3; // 連續 3 幀相同判斷才確認更新，防止跳針
+    const CONFIRM_THRESHOLD = 3; 
+    let lastGasSendTime = 0;
+    const GAS_COOLDOWN_MS = 3000; // 同樣狀態發送冷卻時間：3秒
+
+    // 🔊 Web Audio API 蜂鳴警報器
+    let audioCtx = null;
+    let alarmInterval = null;
+
+    function playAlarmSound() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
+      if (!alarmInterval) {
+        alarmInterval = setInterval(() => {
+          if (predictLabel === "打瞌睡") {
+            let osc = audioCtx.createOscillator();
+            let gain = audioCtx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // 880Hz (A5 高音警示)
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.2);
+          } else {
+            clearInterval(alarmInterval);
+            alarmInterval = null;
+          }
+        }, 400);
+      }
+    }
 
     function updatePhoneLocation(callback) {
       if ("geolocation" in navigator) {
@@ -87,39 +129,38 @@
             if (callback) callback();
           },
           (error) => {
-            console.warn("⚠️ 第一次定位失敗，嘗試低精度備用定位...", error.message);
+            console.warn("⚠️ 高精度定位失敗，切換低精度備用...", error.message);
             navigator.geolocation.getCurrentPosition(
               (pos) => {
                 userLat = pos.coords.latitude.toFixed(6);
                 userLng = pos.coords.longitude.toFixed(6);
-                console.log(`📱 備用 GPS 定位成功: ${userLat}, ${userLng}`);
                 if (callback) callback();
               },
               (err2) => {
-                console.error("❌ GPS 定位徹底失敗:", err2.message);
-                if (err2.code === err2.PERMISSION_DENIED) {
-                  alert("⚠️ 系統無法取得 GPS 定位：請至手機設定中允許瀏覽器存取「位置資訊」。");
-                }
+                console.error("❌ GPS 定位無回應:", err2.message);
                 if (callback) callback();
               },
-              { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
+              { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
             );
           },
-          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+          { enableHighAccuracy: true, timeout: 4000, maximumAge: 10000 }
         );
       } else {
-        console.error("❌ 你的瀏覽器不支援 Geolocation 定位功能");
         if (callback) callback();
       }
     }
 
     function sendToGAS(status) {
       if (!gasUrl || gasUrl.includes("你的_DEPLOYMENT_ID")) return;
+
+      const now = Date.now();
+      if (now - lastGasSendTime < GAS_COOLDOWN_MS && status === lastLabel) {
+        return; // 防暴衝節流
+      }
+      lastGasSendTime = now;
       
       if (userLat === "無") {
-        updatePhoneLocation(() => {
-          executeGASPost(status);
-        });
+        updatePhoneLocation(() => executeGASPost(status));
       } else {
         executeGASPost(status);
       }
@@ -132,11 +173,10 @@
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify(payloadData)
       })
-      .then(() => console.log(`✅ 狀態 [${status}] 已同步至 GAS！ (GPS: ${userLat}, ${userLng})`))
-      .catch(err => console.error("❌ 同步 GAS 失敗:", err));
+      .then(() => console.log(`✅ 狀態 [${status}] 已傳送至 GAS (GPS: ${userLat}, ${userLng})`))
+      .catch(err => console.error("❌ GAS 傳送失敗:", err));
     }
 
-    // 將特徵點數據嚴格清洗並轉換為 1044 長度陣列
     function getCleanInputData() {
       let inputData = [];
       let count = Math.min(keypointsList.length, 348);
@@ -147,9 +187,7 @@
         let y = (pt && typeof pt.y === 'number' && !isNaN(pt.y)) ? pt.y : 0;
         let z = (pt && typeof pt.z === 'number' && !isNaN(pt.z)) ? pt.z : 0;
         
-        inputData.push(x);
-        inputData.push(y);
-        inputData.push(z);
+        inputData.push(x, y, z);
       }
       
       while (inputData.length < 1044) {
@@ -166,14 +204,13 @@
         try {
           nn.classify(inputs, gotResults);
         } catch (err) {
-          console.error("❌ 推論觸發失敗:", err);
+          console.error("❌ 推論失敗:", err);
           isPredicting = false;
         }
       }
     }
 
     function checkStatus(rawLabel){
-      // 防抖動連續幀確認機制
       if (rawLabel === pendingLabel) {
         labelCount++;
       } else {
@@ -183,6 +220,12 @@
 
       if (labelCount >= CONFIRM_THRESHOLD) {
         predictLabel = pendingLabel;
+        
+        // 觸發蜂鳴警報
+        if (predictLabel === "打瞌睡") {
+          playAlarmSound();
+        }
+
         if(predictLabel !== lastLabel && predictLabel !== "載入中..."){
           console.log("🔄 狀態確認變更: " + predictLabel);
           sendToGAS(predictLabel);
@@ -193,21 +236,14 @@
 
     function gotResults(error, results) {
       isPredicting = false;
+      if (error || !results || results.length === 0) return;
       
-      if (error) {
-        console.error("❌ ml5 推論過程報錯:", error);
-        return;
-      }
-      
-      if (results && results.length > 0) {
-        let currentLabel = String(results[0].label).trim();
-        confidenceVal = (results[0].confidence * 100).toFixed(0);
-        checkStatus(currentLabel);
-      }
+      let currentLabel = String(results[0].label).trim();
+      confidenceVal = (results[0].confidence * 100).toFixed(0);
+      checkStatus(currentLabel);
     }
 
     function uploadModel() {
-      console.log("⏳ 開始下載並載入 AI 分類模型檔...");
       const modelInfo = {
         model: 'model.json',
         metadata: 'model_meta.json',
@@ -215,25 +251,34 @@
       };
       
       nn.load(modelInfo, () => {
-        console.log('✅ AI 分類模型已成功載入！');
+        console.log('✅ AI 分類模型載入完成');
         isModelReady = true;
       });
     }
 
+    // 繪製特徵點（含水平鏡像對應）
     function drawKeypoints() {  
       if (keypointsList && keypointsList.length > 0) {
         push();
-        fill(0, 255, 0); 
+        fill(0, 255, 150); 
         noStroke();
         for (let i = 0; i < keypointsList.length; i++) {
           let pt = keypointsList[i];
-          ellipse(pt.x, pt.y, 3, 3);
+          // 鏡像翻轉 X 座標
+          let mirrorX = width - pt.x;
+          ellipse(mirrorX, pt.y, 3, 3);
         }
         pop();
       }
     }
 
     async function renderFaceMesh() {
+      // 若頁面不在前景則暫停偵測以節省效能
+      if (document.hidden) {
+        setTimeout(renderFaceMesh, 200);
+        return;
+      }
+
       if (isCameraReady && faceDetector && videoElement.readyState >= 2) {
         try {
           const faces = await faceDetector.estimateFaces(videoElement, { flipHorizontal: false });
@@ -249,7 +294,7 @@
             checkStatus("未偵測到人臉");
           }
         } catch (e) {
-          console.warn("⚠️ FaceMesh 偵測遇障:", e);
+          console.warn("⚠️ FaceMesh 畫面解析異常:", e);
         }
       }
       requestAnimationFrame(renderFaceMesh);
@@ -265,13 +310,12 @@
       }
 
       try {
-        // 優化行動裝置前鏡頭設定與張數限制
         const constraints = {
           video: {
             facingMode: "user",
             width: { ideal: videoSizeW },
             height: { ideal: videoSizeH },
-            frameRate: { ideal: 30, max: 60 }
+            frameRate: { ideal: 30 }
           },
           audio: false
         };
@@ -296,13 +340,26 @@
           renderFaceMesh(); 
         };
       } catch (err) {
-        alert("⚠️ 請授權攝影機存取！");
+        alert("⚠️ 無法存取攝影機，請檢查權限與 HTTPS 連線設定！");
       }
     }
 
     function setup() {
+      // 📱 動態計算 RWD 適應螢幕尺寸
+      let calcW = Math.min(windowWidth - 20, 640);
+      let calcH = Math.round(calcW * (480 / 640));
+      videoSizeW = calcW;
+      videoSizeH = calcH;
+
       let canvas = createCanvas(videoSizeW, videoSizeH);
       canvas.parent('canvas-container');
+
+      // 點擊畫面啟用 AudioContext（瀏覽器聲音安全政策）
+      canvas.mousePressed(() => {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+      });
 
       updatePhoneLocation();
 
@@ -317,21 +374,31 @@
       initCameraAndFaceMesh();
     }
 
-    function draw() {
-      background(0);
+    function windowResized() {
+      let calcW = Math.min(windowWidth - 20, 640);
+      let calcH = Math.round(calcW * (480 / 640));
+      resizeCanvas(calcW, calcH);
+    }
 
-      // 1. 繪製攝影機畫面
+    function draw() {
+      background(15);
+
+      // 1. 繪製攝影機畫面（水平鏡像翻轉，如同後照鏡）
       if (isCameraReady && videoElement) {
-        drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
+        push();
+        translate(width, 0);
+        scale(-1, 1);
+        drawingContext.drawImage(videoElement, 0, 0, width, height);
+        pop();
       }
 
-      // 2. 繪製綠色網格
+      // 2. 繪製網格特徵點
       drawKeypoints();   
       
-      // 3. 頂部遮罩
+      // 3. 頂部狀態列背景遮罩
       push();
-      fill(0, 0, 0, 180);
-      rect(0, 0, width, 70);
+      fill(0, 0, 0, 190);
+      rect(0, 0, width, 60);
       pop();
 
       // 4. 文字狀態顯示
@@ -339,28 +406,28 @@
       textAlign(CENTER, CENTER);
 
       if (!isFaceMeshReady || !isModelReady) {
-        fill(255, 255, 0);
-        textSize(22);
-        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 分類模型下載中...";
-        text(msg, width / 2, 35);
+        fill(255, 200, 0);
+        textSize(18);
+        let msg = !isFaceMeshReady ? "⏳ 臉部模型初始化中..." : "⏳ AI 分類模型下載中...";
+        text(msg, width / 2, 30);
       } else if (predictLabel === "打瞌睡") {
-        fill(255, 50, 50);
-        textSize(30);
+        fill(255, 60, 60);
+        textSize(24);
         textStyle(BOLD);
-        text("⚠️ 警告：打瞌睡中！ (" + confidenceVal + "%)", width / 2, 35);
+        text("🚨 警告：偵測到打瞌睡 (" + confidenceVal + "%)", width / 2, 30);
       } else if (predictLabel === "未偵測到人臉") {
-        fill(200, 200, 200);
-        textSize(26);
-        text("👤 請將臉部對準鏡頭", width / 2, 35);
+        fill(180, 180, 180);
+        textSize(20);
+        text("👤 請將臉部對準鏡頭", width / 2, 30);
       } else if (predictLabel === "載入中...") {
-        fill(255, 255, 0);
-        textSize(22);
-        text("⏳ AI 分析推論中...", width / 2, 35);
+        fill(255, 220, 0);
+        textSize(18);
+        text("⏳ AI 分析推論中...", width / 2, 30);
       } else {
-        fill(0, 255, 127);
-        textSize(28);
+        fill(50, 230, 120);
+        textSize(22);
         textStyle(BOLD);
-        text("🟢 狀態：" + predictLabel + " (" + confidenceVal + "%)", width / 2, 35);
+        text("🟢 狀態：" + predictLabel + " (" + confidenceVal + "%)", width / 2, 30);
       }
       pop();
     }
