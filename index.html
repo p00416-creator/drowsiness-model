@@ -4,16 +4,16 @@
   <meta charset="UTF-8">
   <title>AI 疲勞駕駛監控系統</title>
   
-  <!-- 1. 載入 TensorFlow.js Core & WebGL & CPU 後端 -->
+  <!-- 1. TensorFlow.js Core & WebGL/CPU -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu"></script>
   
-  <!-- 2. 載入 Google 官方 Face Landmarks Detection 模型 -->
+  <!-- 2. Google 官方 Face Landmarks Detection -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
   
-  <!-- 3. 載入 p5.js, ml5.js 與 MQTT.js -->
+  <!-- 3. p5.js, ml5.js & MQTT.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
   <script src="https://unpkg.com/ml5@0.6.0/dist/ml5.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
@@ -39,9 +39,7 @@
       box-shadow: 0 8px 24px rgba(0,0,0,0.6);
       position: relative;
     }
-    #webcam-video {
-      display: none;
-    }
+    #webcam-video { display: none; }
   </style>
 </head>
 <body>
@@ -64,8 +62,9 @@
     let videoElement;
     let faceDetector;
     let keypointsList = []; 
-    let predictLabel = "等待辨識...";
-    let confidenceVal = 0;
+    let predictLabel = "等待 AI 推理中...";
+    let confidenceVal = "0";
+    let rawDebugText = "";
     let nn;
     
     let isCameraReady = false;
@@ -133,7 +132,7 @@
       if (isModelReady && keypointsList.length > 0) {
         let currentInputs = getCurrentData();
         if (currentInputs.length === 1044) {
-          nn.classify([currentInputs], gotResults);
+          nn.classify(currentInputs, gotResults);
         }
       }
     }
@@ -155,12 +154,13 @@
 
     function gotResults(error, results) {
       if (error) {
-        console.error("❌ AI 分類錯誤:", error);
+        console.error("❌ 分類異常:", error);
         return;
       }
       if (results && results.length > 0) {
+        rawDebugText = results[0].label;
         predictLabel = results[0].label;
-        confidenceVal = (results[0].confidence * 100).toFixed(1);
+        confidenceVal = (results[0].confidence * 100).toFixed(0);
         checkStatus();
       }
     }
@@ -203,7 +203,7 @@
             predictLabel = "未偵測到人臉";
           }
         } catch (e) {
-          console.warn("⚠️ 偵測異常:", e);
+          console.warn("⚠️ 偵測遇障:", e);
         }
       }
       requestAnimationFrame(renderFaceMesh);
@@ -214,9 +214,7 @@
 
       try {
         await tf.setBackend('webgl');
-        console.log("⚡ 使用 WebGL 硬體加速");
       } catch (e) {
-        console.warn("⚠️ WebGL 失敗，切換至 CPU 模式");
         await tf.setBackend('cpu');
       }
 
@@ -228,7 +226,6 @@
         videoElement.srcObject = stream;
         
         videoElement.onloadedmetadata = async () => {
-          console.log("📷 攝影機啟動成功！載入 FaceMesh 模型...");
           isCameraReady = true;
 
           const model = faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh;
@@ -239,14 +236,12 @@
           };
           
           faceDetector = await faceLandmarksDetection.createDetector(model, detectorConfig);
-          console.log("✅ FaceMesh 模型讀取完畢！");
           isFaceMeshReady = true;
           
           uploadModel(); 
           renderFaceMesh(); 
         };
       } catch (err) {
-        console.error("❌ 無法取得攝影機權限: ", err);
         alert("⚠️ 請授權攝影機存取！");
       }
     }
@@ -272,39 +267,39 @@
     function draw() {
       background(0);
 
-      // 1. 畫影像
+      // 1. 鏡頭影像
       if (isCameraReady && videoElement) {
         drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
       }
 
-      // 2. 畫特徵點
+      // 2. 螢光綠特徵點
       drawKeypoints();   
       
-      // 3. 頂部狀態列背景條
+      // 3. 頂部黑色底區塊（確保文字永遠可讀）
       push();
-      fill(0, 0, 0, 160);
-      rect(0, 0, width, 60);
+      fill(0, 0, 0, 180);
+      rect(0, 0, width, 70);
       pop();
 
-      // 4. 文字顯示
+      // 4. 強制狀態文字渲染
       textAlign(CENTER, CENTER);
 
       if (!isFaceMeshReady || !isModelReady) {
         fill(255, 255, 0);
         textSize(22);
-        let msg = !isFaceMeshReady ? "⏳ FaceMesh 人臉模型載入中..." : "⏳ AI 分類模型下載中...";
-        text(msg, width / 2, 30);
+        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 分類模型下載中...";
+        text(msg, width / 2, 35);
       } else if (predictLabel === "打瞌睡") {
         fill(255, 50, 50);
         textSize(32);
         textStyle(BOLD);
-        text("⚠️ 警告：請保持清醒！ (" + confidenceVal + "%)", width / 2, 30);
+        text("⚠️ 警告：打瞌睡中！ (" + confidenceVal + "%)", width / 2, 35);
       } else {
-        // 清醒或其他狀態 (例如正常/normal/未偵測到)
+        // 清醒 / 正常 / 其它任何非打瞌睡狀態
         fill(0, 255, 127);
         textSize(28);
         textStyle(BOLD);
-        text("🟢 狀態：" + predictLabel + " (" + confidenceVal + "%)", width / 2, 30);
+        text("🟢 狀態：" + predictLabel + " (" + confidenceVal + "%)", width / 2, 35);
       }
     }
   </script>
