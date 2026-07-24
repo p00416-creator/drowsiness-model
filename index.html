@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)4</title>
+  <title>AI 疲勞駕駛監控系統 (GAS 雲端版-10:30)</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -49,7 +49,6 @@
   <video id="webcam-video" width="640" height="480" autoplay playsinline muted></video>
 
   <script>
-    // 🔗 請確認這是你的最新 GAS 部署網址 (需包含 /exec)
     const gasUrl = "https://script.google.com/macros/s/AKfycbyGFrd3VqxAZ6vRGvWF-s4mzrSKas1gM0af09G6-_TXUEvJdNFUKYKM_jBDi8Eb1HHs/exec";
 
     let videoElement;
@@ -94,21 +93,20 @@
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify(payloadData)
       })
-      .then(() => console.log(`✅ 狀態 [${status}] 已同步至 Google 試算表 (GAS)！`))
+      .then(() => console.log(`✅ 狀態 [${status}] 已同步至 GAS！`))
       .catch(err => console.error("❌ 同步 GAS 失敗:", err));
     }
 
-    // 將 FaceMesh 的 keypoints 格式化為長度為 1044 的數值陣列
+    // 將特徵點轉換為 1044 長度的純數值陣列
     function getCleanInputData() {
       let inputData = [];
       let count = Math.min(keypointsList.length, 348);
       for (let i = 0; i < count; i++) {
         let pt = keypointsList[i];
-        inputData.push(typeof pt.x === 'number' ? pt.x : 0);
-        inputData.push(typeof pt.y === 'number' ? pt.y : 0);
-        inputData.push(typeof pt.z === 'number' ? pt.z : 0);
+        inputData.push(Number(pt.x) || 0);
+        inputData.push(Number(pt.y) || 0);
+        inputData.push(Number(pt.z) || 0);
       }
-      // 補齊位數至 1044
       while (inputData.length < 1044) {
         inputData.push(0);
       }
@@ -121,10 +119,11 @@
         let inputs = getCleanInputData();
         
         try {
+          // ml5 支持直接傳入陣列進行分類
           nn.classify(inputs, gotResults);
-        } catch(e) {
-          console.error("❌ 推論觸發異常:", e);
-          isPredicting = false;
+        } catch (err) {
+          console.error("❌ 推論觸發失敗:", err);
+          isPredicting = false; // 發生例外時強制解鎖
         }
       }
     }
@@ -139,30 +138,32 @@
     }
 
     function gotResults(error, results) {
-      isPredicting = false;
+      isPredicting = false; // 推論完成，解鎖允許下一次推論
+      
       if (error) {
-        console.error("❌ ml5 分類錯誤:", error);
+        console.error("❌ ml5 推論錯誤:", error);
         return;
       }
+      
       if (results && results.length > 0) {
         predictLabel = String(results[0].label).trim();
         confidenceVal = (results[0].confidence * 100).toFixed(0);
         checkStatus();
+      } else {
+        console.warn("⚠️ ml5 未回傳無效結果");
       }
     }
 
     function uploadModel() {
-      console.log("⏳ 正在嘗試載入 AI 分類模型檔案...");
-      
-      // 使用相對於根目錄的路徑
+      console.log("⏳ 開始載入 AI 分類模型檔...");
       const modelInfo = {
-        model: './model.json',
-        metadata: './model_meta.json',
-        weights: './model.weights.bin',
+        model: 'model.json',
+        metadata: 'model_meta.json',
+        weights: 'model.weights.bin',
       };
       
       nn.load(modelInfo, () => {
-        console.log('🎉 ✅ AI 分類模型 successfully 載入完成！');
+        console.log('✅ AI 分類模型載入完成，準備推論！');
         isModelReady = true;
       });
     }
@@ -184,9 +185,9 @@
       if (isCameraReady && faceDetector && videoElement.readyState >= 2) {
         try {
           const faces = await faceDetector.estimateFaces(videoElement, { flipHorizontal: false });
-          if (faces.length > 0) {
+          if (faces && faces.length > 0) {
             keypointsList = faces[0].keypoints;
-            predictData();
+            predictData(); // 嘗試進行 AI 推論
           } else {
             keypointsList = [];
             predictLabel = "未偵測到人臉";
@@ -243,7 +244,6 @@
 
       updatePhoneLocation();
 
-      // 初始化 ml5 神經網路
       const options = {
         inputs: 1044,
         outputs: 2,
@@ -258,24 +258,28 @@
     function draw() {
       background(0);
 
+      // 1. 繪製攝影機畫面
       if (isCameraReady && videoElement) {
         drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
       }
 
+      // 2. 繪製綠色特徵點
       drawKeypoints();   
       
+      // 3. 頂部遮罩
       push();
       fill(0, 0, 0, 180);
       rect(0, 0, width, 70);
       pop();
 
+      // 4. 文字顯示
       push();
       textAlign(CENTER, CENTER);
 
       if (!isFaceMeshReady || !isModelReady) {
         fill(255, 255, 0);
         textSize(22);
-        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 分類模型下載中 (請檢查 Console)...";
+        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 模型下載中...";
         text(msg, width / 2, 35);
       } else if (predictLabel === "打瞌睡") {
         fill(255, 50, 50);
