@@ -2,7 +2,8 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)13:28</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)13:30</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -23,20 +24,21 @@
       padding: 0;
       background-color: #121212;
       color: white;
-      font-family: Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       min-height: 100vh;
     }
-    h2 { margin: 10px 0 15px 0; }
+    h2 { margin: 10px 0 15px 0; font-size: 1.4rem; text-align: center; }
     #canvas-container {
       border: 3px solid #333;
       border-radius: 12px;
       overflow: hidden;
       box-shadow: 0 8px 24px rgba(0,0,0,0.6);
       position: relative;
+      max-width: 100%;
     }
     #webcam-video { display: none; }
   </style>
@@ -69,6 +71,11 @@
 
     let userLat = "無";
     let userLng = "無";
+
+    // 🎯 防抖動與連續狀態確認機制
+    let pendingLabel = "";
+    let labelCount = 0;
+    const CONFIRM_THRESHOLD = 3; // 連續 3 幀相同判斷才確認更新，防止跳針
 
     function updatePhoneLocation(callback) {
       if ("geolocation" in navigator) {
@@ -109,7 +116,6 @@
     function sendToGAS(status) {
       if (!gasUrl || gasUrl.includes("你的_DEPLOYMENT_ID")) return;
       
-      // 如果定位尚未完成，先嘗試補抓定位再發送
       if (userLat === "無") {
         updatePhoneLocation(() => {
           executeGASPost(status);
@@ -130,7 +136,7 @@
       .catch(err => console.error("❌ 同步 GAS 失敗:", err));
     }
 
-    // 嚴格將特徵點轉為長度為 1044 的數值陣列，避免帶入 NaN
+    // 將特徵點數據嚴格清洗並轉換為 1044 長度陣列
     function getCleanInputData() {
       let inputData = [];
       let count = Math.min(keypointsList.length, 348);
@@ -166,11 +172,22 @@
       }
     }
 
-    function checkStatus(){
-      if(predictLabel !== lastLabel && predictLabel !== "載入中..."){
-        console.log("🔄 狀態變更: " + predictLabel);
-        sendToGAS(predictLabel);
-        lastLabel = predictLabel;
+    function checkStatus(rawLabel){
+      // 防抖動連續幀確認機制
+      if (rawLabel === pendingLabel) {
+        labelCount++;
+      } else {
+        pendingLabel = rawLabel;
+        labelCount = 1;
+      }
+
+      if (labelCount >= CONFIRM_THRESHOLD) {
+        predictLabel = pendingLabel;
+        if(predictLabel !== lastLabel && predictLabel !== "載入中..."){
+          console.log("🔄 狀態確認變更: " + predictLabel);
+          sendToGAS(predictLabel);
+          lastLabel = predictLabel;
+        }
       }
     }
 
@@ -183,9 +200,9 @@
       }
       
       if (results && results.length > 0) {
-        predictLabel = String(results[0].label).trim();
+        let currentLabel = String(results[0].label).trim();
         confidenceVal = (results[0].confidence * 100).toFixed(0);
-        checkStatus();
+        checkStatus(currentLabel);
       }
     }
 
@@ -228,9 +245,8 @@
             }
           } else {
             keypointsList = [];
-            predictLabel = "未偵測到人臉";
             confidenceVal = "0";
-            checkStatus();
+            checkStatus("未偵測到人臉");
           }
         } catch (e) {
           console.warn("⚠️ FaceMesh 偵測遇障:", e);
@@ -249,10 +265,18 @@
       }
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: videoSizeW, height: videoSizeH },
+        // 優化行動裝置前鏡頭設定與張數限制
+        const constraints = {
+          video: {
+            facingMode: "user",
+            width: { ideal: videoSizeW },
+            height: { ideal: videoSizeH },
+            frameRate: { ideal: 30, max: 60 }
+          },
           audio: false
-        });
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         videoElement.srcObject = stream;
         
         videoElement.onloadedmetadata = async () => {
