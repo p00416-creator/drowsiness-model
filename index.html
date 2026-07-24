@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <head>
  <meta charset="UTF-8">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)2</title>
+  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)3</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -42,13 +42,13 @@
 </head>
 <body>
 
-  <h2>?? 疲勞駕駛 AI 偵測系統</h2>
+  <h2>🚨 疲勞駕駛 AI 偵測系統</h2>
   
   <div id="canvas-container"></div>
   <video id="webcam-video" width="640" height="480" autoplay playsinline muted></video>
 
   <script>
-    // ?? 貼上你的 GAS 部署網址 (需包含 /exec)
+    // 🔗 貼上你的 GAS 部署網址 (需包含 /exec)
     const gasUrl = "https://script.google.com/macros/s/AKfycbzR-0dO8nyrTmckOUljWXDD8whv9hJMPxmgRJaBzqZBUgR5zPt52Og26LgbGh1vCjSCZQ/exec";
 
     let videoElement;
@@ -78,7 +78,7 @@
             userLng = position.coords.longitude.toFixed(6);
             console.log(`?? GPS 定位成功: ${userLat}, ${userLng}`);
           },
-          (error) => console.warn("?? 定位失敗: ", error.message),
+          (error) => console.warn("⚠️ 定位失敗: ", error.message),
           { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
         );
       }
@@ -93,7 +93,7 @@
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify(payloadData)
       })
-      .then(() => console.log(`? 狀態 [${status}] 已同步至 Google 試算表 (GAS)！`))
+      .then(() => console.log(`狀態 [${status}] 已同步至 Google 試算表 (GAS)！`))
       .catch(err => console.error("? 同步 GAS 失敗:", err));
     }
 
@@ -122,7 +122,7 @@
 
     function checkStatus(){
       if(predictLabel !== lastLabel){
-        console.log("?? 狀態變更: " + predictLabel);
+        console.log("🔄 狀態變更: " + predictLabel);
         if (predictLabel === "打瞌睡") updatePhoneLocation();
         sendToGAS(predictLabel);
         lastLabel = predictLabel;
@@ -132,7 +132,7 @@
     function gotResults(error, results) {
       isPredicting = false;
       if (error) {
-        console.error("? 分類推論失敗:", error);
+        console.error("❌分類推論失敗:", error);
         return;
       }
       if (results && results.length > 0) {
@@ -143,7 +143,7 @@
     }
 
     function uploadModel() {
-      console.log("? 下載 AI 分類模型...");
+      console.log("⏳ 下載 AI 分類模型...");
       const modelInfo = {
         model: 'model.json',
         metadata: 'model_meta.json',
@@ -151,7 +151,7 @@
       };
       
       nn.load(modelInfo, () => {
-        console.log('? AI 分類模型載入完成！');
+        console.log('✅ AI 分類模型載入完成！');
         isModelReady = true;
       });
     }
@@ -183,7 +183,7 @@
             checkStatus();
           }
         } catch (e) {
-          console.warn("?? 偵測遇障:", e);
+          console.warn("⚠️ 偵測遇障:", e);
         }
       }
       requestAnimationFrame(renderFaceMesh);
@@ -222,7 +222,7 @@
           renderFaceMesh(); 
         };
       } catch (err) {
-        alert("?? 請授權攝影機存取！");
+        alert("⚠️ 請授權攝影機存取！");
       }
     }
 
@@ -263,22 +263,22 @@
       if (!isFaceMeshReady || !isModelReady) {
         fill(255, 255, 0);
         textSize(22);
-        let msg = !isFaceMeshReady ? "? FaceMesh 模型載入中..." : "? AI 分類模型下載中...";
+        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 分類模型下載中...";
         text(msg, width / 2, 35);
       } else if (predictLabel === "打瞌睡") {
         fill(255, 50, 50);
         textSize(30);
         textStyle(BOLD);
-        text("?? 警告：打瞌睡中！ (" + confidenceVal + "%)", width / 2, 35);
+        text("⚠️ 警告：打瞌睡中！ (" + confidenceVal + "%)", width / 2, 35);
       } else if (predictLabel === "未偵測到人臉") {
         fill(200, 200, 200);
         textSize(26);
-        text("?? 請將臉部對準鏡頭", width / 2, 35);
+        text("👤 請將臉部對準鏡頭", width / 2, 35);
       } else {
         fill(0, 255, 127);
         textSize(28);
         textStyle(BOLD);
-        text("?? 狀態：" + predictLabel + " (" + confidenceVal + "%)", width / 2, 35);
+        text("🟢 狀態：" + predictLabel + " (" + confidenceVal + "%)", width / 2, 35);
       }
       pop();
     }
