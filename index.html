@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)10:57</title>
+  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)13:28</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -54,7 +54,7 @@
     let videoElement;
     let faceDetector;
     let keypointsList = []; 
-    let predictLabel = "等待 AI 推論中...";
+    let predictLabel = "載入中...";
     let confidenceVal = "0";
     let nn;
     
@@ -70,51 +70,63 @@
     let userLat = "無";
     let userLng = "無";
 
-   function updatePhoneLocation() {
-  if ("geolocation" in navigator) {
-    // 優先嘗試獲取精準 GPS 座標
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        userLat = position.coords.latitude.toFixed(6);
-        userLng = position.coords.longitude.toFixed(6);
-        console.log(`📱 GPS 定位成功: ${userLat}, ${userLng}`);
-      },
-      (error) => {
-        console.warn("⚠️ 第一次定位失敗，嘗試低精度備用定位...", error.message);
-        // 若失敗，調低精確度重新獲取一次
+    function updatePhoneLocation(callback) {
+      if ("geolocation" in navigator) {
         navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            userLat = pos.coords.latitude.toFixed(6);
-            userLng = pos.coords.longitude.toFixed(6);
-            console.log(`📱 備用 GPS 定位成功: ${userLat}, ${userLng}`);
+          (position) => {
+            userLat = position.coords.latitude.toFixed(6);
+            userLng = position.coords.longitude.toFixed(6);
+            console.log(`📱 GPS 定位成功: ${userLat}, ${userLng}`);
+            if (callback) callback();
           },
-          (err2) => {
-            console.error("❌ GPS 定位徹底失敗:", err2.message);
-            // 提示使用者檢查手機定位設定
-            if (err2.code === err2.PERMISSION_DENIED) {
-              alert("⚠️ 系統無法取得 GPS 定位：請至手機設定中允許瀏覽器存取「位置資訊」。");
-            }
+          (error) => {
+            console.warn("⚠️ 第一次定位失敗，嘗試低精度備用定位...", error.message);
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                userLat = pos.coords.latitude.toFixed(6);
+                userLng = pos.coords.longitude.toFixed(6);
+                console.log(`📱 備用 GPS 定位成功: ${userLat}, ${userLng}`);
+                if (callback) callback();
+              },
+              (err2) => {
+                console.error("❌ GPS 定位徹底失敗:", err2.message);
+                if (err2.code === err2.PERMISSION_DENIED) {
+                  alert("⚠️ 系統無法取得 GPS 定位：請至手機設定中允許瀏覽器存取「位置資訊」。");
+                }
+                if (callback) callback();
+              },
+              { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
+            );
           },
-          { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
         );
-      },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-    );
-  } else {
-    console.error("❌ 你的瀏覽器不支援 Geolocation 定位功能");
-  }
-}
+      } else {
+        console.error("❌ 你的瀏覽器不支援 Geolocation 定位功能");
+        if (callback) callback();
+      }
+    }
 
     function sendToGAS(status) {
       if (!gasUrl || gasUrl.includes("你的_DEPLOYMENT_ID")) return;
-      let payloadData = { status: status, lat: userLat, lng: userLng };
       
+      // 如果定位尚未完成，先嘗試補抓定位再發送
+      if (userLat === "無") {
+        updatePhoneLocation(() => {
+          executeGASPost(status);
+        });
+      } else {
+        executeGASPost(status);
+      }
+    }
+
+    function executeGASPost(status) {
+      let payloadData = { status: status, lat: userLat, lng: userLng };
       fetch(gasUrl, {
         method: "POST",
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify(payloadData)
       })
-      .then(() => console.log(`✅ 狀態 [${status}] 已同步至 GAS！`))
+      .then(() => console.log(`✅ 狀態 [${status}] 已同步至 GAS！ (GPS: ${userLat}, ${userLng})`))
       .catch(err => console.error("❌ 同步 GAS 失敗:", err));
     }
 
@@ -134,7 +146,6 @@
         inputData.push(z);
       }
       
-      // 補齊至 1044 長度
       while (inputData.length < 1044) {
         inputData.push(0);
       }
@@ -147,26 +158,24 @@
         let inputs = getCleanInputData();
         
         try {
-          // ml5 神經網路推論
           nn.classify(inputs, gotResults);
         } catch (err) {
           console.error("❌ 推論觸發失敗:", err);
-          isPredicting = false; // 強制解鎖
+          isPredicting = false;
         }
       }
     }
 
     function checkStatus(){
-      if(predictLabel !== lastLabel){
+      if(predictLabel !== lastLabel && predictLabel !== "載入中..."){
         console.log("🔄 狀態變更: " + predictLabel);
-        if (predictLabel === "打瞌睡") updatePhoneLocation();
         sendToGAS(predictLabel);
         lastLabel = predictLabel;
       }
     }
 
     function gotResults(error, results) {
-      isPredicting = false; // 解除推論鎖定
+      isPredicting = false;
       
       if (error) {
         console.error("❌ ml5 推論過程報錯:", error);
@@ -174,7 +183,6 @@
       }
       
       if (results && results.length > 0) {
-        // 順利取得結果
         predictLabel = String(results[0].label).trim();
         confidenceVal = (results[0].confidence * 100).toFixed(0);
         checkStatus();
@@ -216,7 +224,7 @@
           if (faces && faces.length > 0) {
             keypointsList = faces[0].keypoints || [];
             if (keypointsList.length > 0) {
-              predictData(); // 觸發 AI 推論
+              predictData();
             }
           } else {
             keypointsList = [];
@@ -274,7 +282,6 @@
 
       updatePhoneLocation();
 
-      // 初始化 ml5 神經網路
       const options = {
         inputs: 1044,
         outputs: 2,
@@ -321,6 +328,10 @@
         fill(200, 200, 200);
         textSize(26);
         text("👤 請將臉部對準鏡頭", width / 2, 35);
+      } else if (predictLabel === "載入中...") {
+        fill(255, 255, 0);
+        textSize(22);
+        text("⏳ AI 分析推論中...", width / 2, 35);
       } else {
         fill(0, 255, 127);
         textSize(28);
