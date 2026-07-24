@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>AI 疲勞駕駛監控系統v7</title>
+  <title>AI 疲勞駕駛監控系統v8</title>
   
   <!-- 1. TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -69,6 +69,7 @@
     let isCameraReady = false;
     let isFaceMeshReady = false;
     let isModelReady = false;
+    let isPredicting = false; // 防止重複推論卡死
 
     let lastLabel = "";
     let videoSizeW = 640;
@@ -113,15 +114,15 @@
       client.on("error", (err) => console.error("❌ MQTT 錯誤:", err));
     }
 
-    // 💡 關鍵修正：嚴格清洗特徵點數據為 1044 長度的純數字陣列
+    // 嚴格清洗特徵點數據為 1044 長度的純數字陣列
     function getCleanInputData() {
       let inputData = [];
       let count = Math.min(keypointsList.length, 348);
       for (let i = 0; i < count; i++) {
         let pt = keypointsList[i];
-        inputData.push(Number(pt.x) || 0);
-        inputData.push(Number(pt.y) || 0);
-        inputData.push(Number(pt.z) || 0);
+        inputData.push(typeof pt.x === 'number' ? pt.x : 0);
+        inputData.push(typeof pt.y === 'number' ? pt.y : 0);
+        inputData.push(typeof pt.z === 'number' ? pt.z : 0);
       }
       // 補齊至 1044 長度
       while (inputData.length < 1044) {
@@ -131,9 +132,10 @@
     }
 
     function predictData() {
-      if (isModelReady && keypointsList.length > 0) {
+      // 確保模型就緒、有特徵點且當前沒有正在執行的推論
+      if (isModelReady && keypointsList.length > 0 && !isPredicting) {
+        isPredicting = true;
         let inputs = getCleanInputData();
-        // 直接傳入標準一維陣列
         nn.classify(inputs, gotResults);
       }
     }
@@ -149,11 +151,12 @@
           client.publish(mqttTopic, predictLabel);
           console.log("📡 發送 MQTT: " + predictLabel);
         }
+        lastLabel = predictLabel;
       }
-      lastLabel = predictLabel;
     }
 
     function gotResults(error, results) {
+      isPredicting = false; // 解除推論鎖定
       if (error) {
         console.error("❌ 分類推論失敗:", error);
         return;
@@ -173,6 +176,7 @@
         metadata: 'model_meta.json',
         weights: 'model.weights.bin',
       };
+      
       nn.load(modelInfo, () => {
         console.log('✅ GitHub AI 分類模型讀取完成！');
         isModelReady = true;
@@ -198,11 +202,12 @@
           const faces = await faceDetector.estimateFaces(videoElement, { flipHorizontal: false });
           if (faces.length > 0) {
             keypointsList = faces[0].keypoints;
-            predictData();
+            predictData(); // 嘗試進行 AI 分類推論
           } else {
             keypointsList = [];
             predictLabel = "未偵測到人臉";
             confidenceVal = "0";
+            checkStatus();
           }
         } catch (e) {
           console.warn("⚠️ 偵測遇障:", e);
@@ -240,6 +245,7 @@
           faceDetector = await faceLandmarksDetection.createDetector(model, detectorConfig);
           isFaceMeshReady = true;
           
+          // FaceMesh 準備好後再開始繪製與載入模型
           uploadModel(); 
           renderFaceMesh(); 
         };
@@ -254,12 +260,14 @@
 
       updatePhoneLocation();
 
+      // 初始化 ml5 神經網路
       const options = {
         inputs: 1044,
         outputs: 2,
         task: 'classification',
         debug: false
       };
+      
       nn = ml5.neuralNetwork(options);
 
       mqttSetup();
@@ -274,7 +282,7 @@
         drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
       }
 
-      // 2. 繪製綠色網格
+      // 2. 繪製綠色特徵點
       drawKeypoints();   
       
       // 3. 頂部黑色條狀遮罩
@@ -283,22 +291,25 @@
       rect(0, 0, width, 70);
       pop();
 
-      // 4. 文字顯示（無視狀態強制渲染）
+      // 4. 文字顯示
       push();
       textAlign(CENTER, CENTER);
 
       if (!isFaceMeshReady || !isModelReady) {
         fill(255, 255, 0);
         textSize(22);
-        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 模型下載中...";
+        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 分類模型下載中...";
         text(msg, width / 2, 35);
       } else if (predictLabel === "打瞌睡") {
         fill(255, 50, 50);
         textSize(30);
         textStyle(BOLD);
         text("⚠️ 警告：打瞌睡中！ (" + confidenceVal + "%)", width / 2, 35);
+      } else if (predictLabel === "未偵測到人臉") {
+        fill(200, 200, 200);
+        textSize(26);
+        text("👤 請將臉部對準鏡頭", width / 2, 35);
       } else {
-        // 🟢 只要不是「打瞌睡」，無條件顯示當前標籤與信心度
         fill(0, 255, 127);
         textSize(28);
         textStyle(BOLD);
