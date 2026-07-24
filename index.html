@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)14:23</title>
+  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)16:05</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -64,7 +64,7 @@
     let videoElement;
     let faceDetector;
     let keypointsList = []; 
-    let predictLabel = "載入中...";
+    let predictLabel = "清醒";
     let confidenceVal = "0";
     let nn;
     
@@ -83,7 +83,7 @@
     // 🎯 防抖動與請求節流機制
     let pendingLabel = "";
     let labelCount = 0;
-    const CONFIRM_THRESHOLD = 3; 
+    const CONFIRM_THRESHOLD = 1; 
     let lastGasSendTime = 0;
     const GAS_COOLDOWN_MS = 3000; // 同樣狀態發送冷卻時間：3秒
 
@@ -177,73 +177,54 @@
       .catch(err => console.error("❌ GAS 傳送失敗:", err));
     }
 
-    function getCleanInputData() {
-      let inputData = [];
-      let count = Math.min(keypointsList.length, 348);
-      
-      for (let i = 0; i < count; i++) {
-        let pt = keypointsList[i];
-        let x = (pt && typeof pt.x == 'number' && !isNaN(pt.x)) ? pt.x : 0;
-        let y = (pt && typeof pt.y == 'number' && !isNaN(pt.y)) ? pt.y : 0;
-        let z = (pt && typeof pt.z == 'number' && !isNaN(pt.z)) ? pt.z : 0;
-        
-        inputData.push(x, y, z);
-      }
-      
-      while (inputData.length < 1044) {
-        inputData.push(0);
-      }
-      return inputData;
-    }
-
-    function predictData() {
-      if (isModelReady && keypointsList.length > 0 && !isPredicting) {
-        isPredicting = true;
-        let inputs = getCleanInputData();
-        
-        try {
-          nn.classify(inputs, gotResults);
-        } catch (err) {
-          console.error("❌ 推論失敗:", err);
-          isPredicting = false;
-        }
+// 取得目前的臉部特徵點資料
+function getCurrentData() {
+  let inputData = [];
+  if (predictions.length > 0 && predictions[0].scaledMesh) {
+    const mesh = predictions[0].scaledMesh;
+    for (let j = 0; j < mesh.length; j++) {
+      for (let k = 0; k < mesh[j].length; k++) {
+        inputData.push(mesh[j][k]);
       }
     }
+  }
+  return inputData;
+}
 
-    function checkStatus(rawLabel){
-      if (rawLabel == pendingLabel) {
-        labelCount++;
-      } else {
-        pendingLabel = rawLabel;
-        labelCount = 1;
-      }
+// 進行預測分類
 
-      if (labelCount >= CONFIRM_THRESHOLD) {
-        predictLabel = pendingLabel;
-        
-        // 觸發蜂鳴警報
+// 進行預測分類
+function predictData() {
+  nn.classify([getCurrentData()], gotResults)
+}
+
+// 確認狀態
+function checkStatus(){
+  // 如果狀態變更
+  if(predictLabel != lastLabel){
+     console.log("🔄 狀態確認變更: " + predictLabel);         
+          lastLabel = predictLabel;
+    // 觸發蜂鳴警報
         if (predictLabel == "打瞌睡") {
           playAlarmSound();
-        }
-
-        if(predictLabel != lastLabel && predictLabel != "載入中..."){
-          console.log("🔄 狀態確認變更: " + predictLabel);
           sendToGAS(predictLabel);
-          lastLabel = predictLabel;
-        }
-      }
-    }
+        }       
+  }
+}
+  
+// 取得結果 + 確認狀態
+function gotResults(error, results) {
+  if (error) {
+    console.log('發生錯誤')
+  }
+  else{
+    predictLabel = results[0].label;
+    console.log("預測結果：" + predictLabel);
+    checkStatus();    // 確認狀態
+  }
+}
 
-    function gotResults(error, results) {
-      isPredicting = false;
-      if (error || !results || results.length === 0) return;
-      
-      let currentLabel = String(results[0].label).trim();
-      confidenceVal = (results[0].confidence * 100).toFixed(0);
-      checkStatus(currentLabel);
-    }
-
-    function uploadModel() {
+function uploadModel() {
       const modelInfo = {
         model: 'model.json',
         metadata: 'model_meta.json',
