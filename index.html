@@ -31,6 +31,9 @@
       box-shadow: 0 8px 24px rgba(0,0,0,0.6);
       position: relative;
     }
+    #webcam-video {
+      display: none; /* 隱藏原生 Video 標籤，透過 p5 canvas 繪製 */
+    }
   </style>
 </head>
 <body>
@@ -38,6 +41,8 @@
   <h2>🚨 疲勞駕駛 AI 偵測系統</h2>
   
   <div id="canvas-container"></div>
+  <!-- 原生影音標籤 -->
+  <video id="webcam-video" width="640" height="480" autoplay playsinline muted></video>
 
   <script>
     // 💡 請替換為你真實的 GAS Web App (/exec) 網址
@@ -50,12 +55,13 @@
     let mqttPassword = "aio_QPfP05UOUn7pTKEh6Qjp9EIPQ9Mh";
     let mqttTopic = mqttUsername + "/feeds/alarm";
 
-    let video;
+    let videoElement;
     let facemesh;
     let predictLabel = "";
     let predictions = [];
     let nn;
     
+    let isCameraReady = false;
     let isFaceMeshReady = false;
     let isModelReady = false;
 
@@ -158,31 +164,57 @@
       });
     }
 
-    // 繪製 468 個臉部關鍵點
+    // 🎯 繪製 468 個臉部關鍵點（確保不受 tint 影響）
     function drawKeypoints() {  
-      if (predictions.length > 0) {
-        for (let i = 0; i < predictions.length; i += 1) {
+      if (predictions && predictions.length > 0) {
+        push(); // 隔離樣式設定
+        noStroke();
+        fill(0, 255, 0); // 螢光亮綠色
+        
+        for (let i = 0; i < predictions.length; i++) {
           const keypoints = predictions[i].scaledMesh;
-          fill(100, 255, 100);
-          noStroke();
-          for (let j = 0; j < keypoints.length; j += 1) {
+          for (let j = 0; j < keypoints.length; j++) {
             const [x, y] = keypoints[j];
-            if (x <= videoSizeW && x >= 0 && y <= (videoSizeH - 5) && y >= 0) {
-              ellipse(x, y, 3, 3);
-            }
+            ellipse(x, y, 4, 4); // 繪製直徑 4px 的圓點
           }
         }
+        pop(); // 恢復原樣式
       }
     }
 
     function faceModelReady() {
-      console.log("✅ FaceMesh 模型讀取完成，開始監聽臉部特徵點...");
+      console.log("✅ FaceMesh 模型讀取完成！開始監聽臉部...");
       isFaceMeshReady = true;
       facemesh.on("predict", (results) => {
         predictions = results;
-        predictData();
+        if (predictions.length > 0) {
+          // 在 Console 印出除錯訊息，確認有抓到臉
+          // console.log("👤 抓到臉部數據，關鍵點數:", predictions[0].scaledMesh.length);
+          predictData();
+        }
       });
       uploadModel();
+    }
+
+    async function initCamera() {
+      videoElement = document.getElementById('webcam-video');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: videoSizeW, height: videoSizeH },
+          audio: false
+        });
+        videoElement.srcObject = stream;
+        
+        videoElement.onloadedmetadata = () => {
+          console.log("📷 鏡頭畫面解析度已確認，啟動 FaceMesh 模型...");
+          isCameraReady = true;
+          // 確保鏡頭就緒後才初始化 ml5.facemesh
+          facemesh = ml5.facemesh(videoElement, faceModelReady);
+        };
+      } catch (err) {
+        console.error("❌ 無法取得攝影機畫面: ", err);
+        alert("⚠️ 請授權攝影機使用權限！");
+      }
     }
 
     function setup() {
@@ -191,15 +223,7 @@
 
       updatePhoneLocation();
 
-      // 原生喚起鏡頭
-      video = createCapture(VIDEO, () => {
-        console.log("📷 鏡頭影像流準備就緒，開始載入 FaceMesh...");
-        facemesh = ml5.facemesh(video, faceModelReady);
-      });
-      video.size(videoSizeW, videoSizeH);
-      video.elt.setAttribute('playsinline', '');
-      video.hide();  
-
+      // 初始化 ml5 神經網路
       const options = {
         inputs: 1044,
         outputs: 2,
@@ -209,35 +233,36 @@
       nn = ml5.neuralNetwork(options);
 
       mqttSetup();
+      initCamera(); // 正式喚起鏡頭
     }
 
     function draw() {
       background(0);
 
-      if (video) {
-        image(video, 0, 0, videoSizeW, videoSizeH);
+      // 1. 繪製攝影機畫面
+      if (isCameraReady && videoElement) {
+        drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
       }
 
-      // 繪製網格
+      // 2. 繪製綠色網格關鍵點
       drawKeypoints();   
       
+      // 3. 繪製文字與狀態指示
       textAlign(CENTER, CENTER);
-      
       if (predictLabel === "打瞌睡") {
         fill(255, 50, 50);
         textSize(60);
         textStyle(BOLD);
         text("⚠️ 請保持清醒！", width / 2, height / 3);
-        tint(255, 50, 50);
       } else if (!isFaceMeshReady || !isModelReady) {
+        fill(0, 0, 0, 180);
+        rect(0, 0, width, height); // 半透明遮罩
+        
         fill(255, 255, 0);
-        textSize(32);
-        let msg = !isFaceMeshReady ? "FaceMesh 模型載入中..." : "AI 模型下載中...";
-        text(msg, width / 2, height / 3);
-        tint(150);    
-      } else {
-        tint(255);    
-      } 
+        textSize(28);
+        let msg = !isFaceMeshReady ? "⏳ FaceMesh 人臉模型載入中..." : "⏳ AI 分類模型下載中...";
+        text(msg, width / 2, height / 2);
+      }
     }
   </script>
 </body>
