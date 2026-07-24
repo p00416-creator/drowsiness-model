@@ -1,181 +1,39 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)16:42</title>
-  
-  <!-- TensorFlow.js Core & Backend -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu"></script>
-  
-  <!-- Google Face Landmarks Detection -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
-  
-  <!-- p5.js & ml5.js -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
-  <script src="https://unpkg.com/ml5@0.6.0/dist/ml5.min.js"></script>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Nod off Alarm</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/0.9.0/p5.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/0.9.0/addons/p5.dom.min.js"></script>
+    <script src="https://unpkg.com/ml5@0.6.1/dist/ml5.min.js" type="text/javascript"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      background-color: #121212;
-      color: white;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      overflow: hidden;
-    }
-    h2 { 
-      margin: 8px 0; 
-      font-size: 1.2rem; 
-      text-align: center; 
-      color: #e0e0e0;
-    }
-    #canvas-container {
-      border: 2px solid #444;
-      border-radius: 12px;
-      overflow: hidden;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.8);
-      position: relative;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-    #webcam-video { display: none; }
-  </style>
-</head>
-<body>
-
-  <h2>🚨 AI 疲勞駕駛即時監控16:42</h2>
-  
-  <div id="canvas-container"></div>
-  <video id="webcam-video" width="640" height="480" autoplay playsinline muted></video>
+    <style></style>
+  </head>
 
   <script>
-    const gasUrl = "https://script.google.com/macros/s/AKfycbzR-0dO8nyrTmckOUljWXDD8whv9hJMPxmgRJaBzqZBUgR5zPt52Og26LgbGh1vCjSCZQ/exec";
+  let video;
+let facemesh;
+let predictLabel = "清醒";       // 預測標籤（預設清醒）
+let predictions = [];           // 臉部偵測節點資訊
+let nn;                         // 神經網路
+let loading = false;            // 載入狀態
+let lastLabel;                  // 前一個發送的預測結果
+let videoSizeW = 640;           // 影像寬度
+let videoSizeH = 480;           // 影像高度
+let labels = ['打瞌睡', '清醒'];
 
-    let videoElement;
-    let faceDetector;
-    let keypointsList = []; 
-    let predictLabel = "清醒";
-    let confidenceVal = "0";
-    let nn;
-    
-    let isCameraReady = false;
-    let isFaceMeshReady = false;
-    let isModelReady = false;
-    let isPredicting = false;
+// --------- MQTT 資訊 ---------
+let client;
+let connectMQTT = false;
+let mqttUsername = "we1688";
+let mqttPassword = "aio_QPfP05UOUn7pTKEh6Qjp9EIPQ9Mh"; 
+let mqttTopic = mqttUsername + "/feeds/alarm";
 
-    let lastLabel = "";
-    let videoSizeW = 640;
-    let videoSizeH = 480;
-
-    let userLat = "無";
-    let userLng = "無";
-
-    // 🎯 防抖動與請求節流機制
-    let pendingLabel = "";
-    let labelCount = 0;
-    const CONFIRM_THRESHOLD = 1; 
-    let lastGasSendTime = 0;
-    const GAS_COOLDOWN_MS = 3000; // 同樣狀態發送冷卻時間：3秒
-
-    // 🔊 Web Audio API 蜂鳴警報器
-    let audioCtx = null;
-    let alarmInterval = null;
-
-    function playAlarmSound() {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (audioCtx.state == 'suspended') {
-        audioCtx.resume();
-      }
-
-      if (!alarmInterval) {
-        alarmInterval = setInterval(() => {
-          if (predictLabel == "打瞌睡") {
-            let osc = audioCtx.createOscillator();
-            let gain = audioCtx.createGain();
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // 880Hz (A5 高音警示)
-            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.2);
-          } else {
-            clearInterval(alarmInterval);
-            alarmInterval = null;
-          }
-        }, 400);
-      }
-    }
-
-    function updatePhoneLocation(callback) {
-      if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            userLat = position.coords.latitude.toFixed(6);
-            userLng = position.coords.longitude.toFixed(6);
-            console.log(`📱 GPS 定位成功: ${userLat}, ${userLng}`);
-            if (callback) callback();
-          },
-          (error) => {
-            console.warn("⚠️ 高精度定位失敗，切換低精度備用...", error.message);
-            navigator.geolocation.getCurrentPosition(
-              (pos) => {
-                userLat = pos.coords.latitude.toFixed(6);
-                userLng = pos.coords.longitude.toFixed(6);
-                if (callback) callback();
-              },
-              (err2) => {
-                console.error("❌ GPS 定位無回應:", err2.message);
-                if (callback) callback();
-              },
-              { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
-            );
-          },
-          { enableHighAccuracy: true, timeout: 4000, maximumAge: 10000 }
-        );
-      } else {
-        if (callback) callback();
-      }
-    }
-
-    function sendToGAS(status) {
-      if (!gasUrl || gasUrl.includes("你的_DEPLOYMENT_ID")) return;
-
-      const now = Date.now();
-      if (now - lastGasSendTime < GAS_COOLDOWN_MS && status == lastLabel) {
-        return; // 防暴衝節流
-      }
-      lastGasSendTime = now;
-      
-      if (userLat == "無") {
-        updatePhoneLocation(() => executeGASPost(status));
-      } else {
-        executeGASPost(status);
-      }
-    }
-
-    function executeGASPost(status) {
-      let payloadData = { status: status, lat: userLat, lng: userLng };
-      fetch(gasUrl, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify(payloadData)
-      })
-      .then(() => console.log(`✅ 狀態 [${status}] 已傳送至 GAS (GPS: ${userLat}, ${userLng})`))
-      .catch(err => console.error("❌ GAS 傳送失敗:", err));
-    }
+// --------- 效能與防誤判機制設定 ---------
+let isPredicting = false;       // 神經網路推論鎖（防止請求堆疊）
+let drowsyCounter = 0;          // 打瞌睡連續幀數計數器
+const DROWSY_THRESHOLD = 1;     // 連續偵測到 N 次打瞌睡才觸發告警（防眨眼誤判）
 
 // 取得目前的臉部特徵點資料
 function getCurrentData() {
@@ -198,20 +56,18 @@ function predictData() {
   nn.classify([getCurrentData()], gotResults)
 }
 
+
 // 確認狀態
 function checkStatus(){
   // 如果狀態變更
   if(predictLabel != lastLabel){
-     console.log("🔄 狀態確認變更: " + predictLabel);         
-          lastLabel = predictLabel;
-    // 觸發蜂鳴警報
-        if (predictLabel == "打瞌睡") {
-          playAlarmSound();
-          sendToGAS(predictLabel);
-        }       
+    // 傳送目前狀態
+    client.publish(mqttTopic, predictLabel);
   }
+  lastLabel = predictLabel;
 }
-  
+
+
 // 取得結果 + 確認狀態
 function gotResults(error, results) {
   if (error) {
@@ -224,195 +80,290 @@ function gotResults(error, results) {
   }
 }
 
+
+// ---------- 上傳模型 ----------
 function uploadModel() {
-      const modelInfo = {
-        model: 'model.json',
-        metadata: 'model_meta.json',
-        weights: 'model.weights.bin',
-      };
-      
-      nn.load(modelInfo, () => {
-        console.log('✅ AI 分類模型載入完成');
-        isModelReady = true;
-      });
-    }
+  const modelInfo = {
+    model: 'model.json',
+    metadata: 'model_meta.json',
+    weights: 'model.weights.bin',
+  };
+  nn.load(modelInfo, modelLoaded);
+  loading = true;
+}
 
-    // 繪製特徵點（含水平鏡像對應）
-    function drawKeypoints() {  
-      if (keypointsList && keypointsList.length > 0) {
-        push();
-        fill(0, 255, 150); 
-        noStroke();
-        for (let i = 0; i < keypointsList.length; i++) {
-          let pt = keypointsList[i];
-          // 鏡像翻轉 X 座標
-          let mirrorX = width - pt.x;
-          ellipse(mirrorX, pt.y, 3, 3);
-        }
-        pop();
+function modelLoaded() {
+  console.log("分類器模型載入完成");
+  loading = false;
+}
+
+// 繪製臉部特徵點
+function drawKeypoints() {
+  if (predictions.length === 0) return;
+
+  fill(100, 255, 100);
+  noStroke();
+  
+  for (let i = 0; i < predictions.length; i++) {
+    const keypoints = predictions[i].scaledMesh;
+    for (let j = 0; j < keypoints.length; j++) {
+      const [x, y] = keypoints[j];
+      if (x >= 0 && x <= videoSizeW && y >= 0 && y <= videoSizeH) {
+        ellipse(x, y, 3, 3);
       }
     }
+  }
+}
 
-    async function renderFaceMesh() {
-      // 若頁面不在前景則暫停偵測以節省效能
-      if (document.hidden) {
-        setTimeout(renderFaceMesh, 200);
-        return;
-      }
+function faceModelReady() {
+  console.log("FaceMesh 模型讀取完畢");
+  facemesh.on("predict", gotFaceResult);
+  loading = false;
+  uploadModel(); 
+}
 
-      if (isCameraReady && faceDetector && videoElement.readyState >= 2) {
-        try {
-          const faces = await faceDetector.estimateFaces(videoElement, { flipHorizontal: false });
-          
-          if (faces && faces.length > 0) {
-            keypointsList = faces[0].keypoints || [];
-            if (keypointsList.length > 0) {
-              predictData();
-            }
-          } else {
-            keypointsList = [];
-            confidenceVal = "0";
-           // checkStatus("未偵測到人臉");
-            predictLabel="未偵測到人臉";
-          }
-        } catch (e) {
-          console.warn("⚠️ FaceMesh 畫面解析異常:", e);
-        }
-      }
-      requestAnimationFrame(renderFaceMesh);
-    }
+function gotFaceResult(faceResults) {
+  predictions = faceResults;
+  if (predictions.length > 0) {
+    predictData();
+  }
+}
 
-    async function initCameraAndFaceMesh() {
-      videoElement = document.getElementById('webcam-video');
+// ---------- MQTT 設定 ----------
+function mqttSetup() {
+  let mqttOptions = {
+    username: mqttUsername, // 使用者名稱
+    password: mqttPassword, // 金鑰
+  };
+  client = mqtt.connect("wss://io.adafruit.com:443", mqttOptions);
+  console.log("連線 MQTT 伺服器中...");
+  client.on("connect", mqttConnected);
+}
 
-      try {
-        await tf.setBackend('webgl');
-      } catch (e) {
-        await tf.setBackend('cpu');
-      }
+function mqttConnected() {
+  console.log("已連線 MQTT 伺服器");
+  connectMQTT = true; // 已連接 MQTT 伺服器
+}
 
-      try {
-        const constraints = {
-          video: {
-            facingMode: "user",
-            width: { ideal: videoSizeW },
-            height: { ideal: videoSizeH },
-            frameRate: { ideal: 30 }
-          },
-          audio: false
-        };
+// ---------- p5.js 主程序 ----------
+function setup() {
+  // 修復原本 height * 2 導致畫面下方過大的問題
+  createCanvas(videoSizeW, videoSizeH);
+  
+  video = createCapture(VIDEO);
+  video.size(videoSizeW, videoSizeH);
+  video.hide(); 
 
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        videoElement.srcObject = stream;
-        
-        videoElement.onloadedmetadata = async () => {
-          isCameraReady = true;
+  const options = {
+    inputs: 1044,
+    outputs: 2,
+    task: 'classification',
+    debug: false // 訓練完成後可設為 false 提升效能
+  };
+  nn = ml5.neuralNetwork(options);
 
-          const model = faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh;
-          const detectorConfig = {
-            runtime: 'tfjs',
-            refineLandmarks: false,
-            maxFaces: 1
-          };
-          
-          faceDetector = await faceLandmarksDetection.createDetector(model, detectorConfig);
-          isFaceMeshReady = true;
-          
-          uploadModel(); 
-          renderFaceMesh(); 
-        };
-      } catch (err) {
-        alert("⚠️ 無法存取攝影機，請檢查權限與 HTTPS 連線設定！");
-      }
-    }
+  loading = true;
+  facemesh = ml5.facemesh(video, faceModelReady);
 
-    function setup() {
-      // 📱 動態計算 RWD 適應螢幕尺寸
-      let calcW = Math.min(windowWidth - 20, 640);
-      let calcH = Math.round(calcW * (480 / 640));
-      videoSizeW = calcW;
-      videoSizeH = calcH;
+  mqttSetup();
+}
 
-      let canvas = createCanvas(videoSizeW, videoSizeH);
-      canvas.parent('canvas-container');
+function draw() {
 
-      // 點擊畫面啟用 AudioContext（瀏覽器聲音安全政策）
-      canvas.mousePressed(() => {
-        if (!audioCtx) {
-          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        }
-      });
+  image(video, 0, 0, videoSizeW, videoSizeH);
+   
+  // 在臉部偵測關鍵點畫上圓形
+  drawKeypoints();   
+  
+  // 瞌睡警報更改畫面色調
+  textAlign(CENTER, CENTER);
+  if (predictLabel == "打瞌睡") {
+    fill(255, 255, 255);
+    textSize(72);
+    text("請保持清醒！", width / 2, height / 3)
+    tint(255, 20, 150);
+  } 
+  // 模型讀取中
+  else if (loading){
+    fill(255, 255, 255);
+    textSize(48);
+    text("讀取中...", width / 2, height / 3)
+    tint(100, 100, 100);    
+  }  else {
+    tint(255);    
+  } 
+}
+let xOrigin, yOrigin; // 圖表原點位置
+let xPixels, yPixels; // 圖表 XY 軸刻度間距像素
+let xStep, yStep; // 圖表 XY 軸刻度值間隔
+let xStart, yStart; // 圖表 XY 軸刻度值啟始值
+let txtSize; // 圖表刻度文字大小
 
-      updatePhoneLocation();
+// 繪製圓形數值
+function drawCircledNum(
+  x,         // 圓心及半徑
+  y,
+  r, 
+  cr,        // 填色
+  cg,
+  cb, 
+  txtSize,   // 文字大小
+  num,       // 數值
+  xOff,
+  yOff       // 文字偏移
+) {
+  fill(cr, cg, cb);
+  circle(x, y, r);
+  textSize(txtSize);
+  fill(255, 255, 255);
+  textAlign(CENTER, CENTER);
+  text(num, x + xOff, y + yOff);
+}
 
-      const options = {
-        inputs: 1044,
-        outputs: 2,
-        task: 'classification',
-        debug: false
-      };
-      
-      nn = ml5.neuralNetwork(options);
-      initCameraAndFaceMesh();
-    }
+//----繪製 XY 軸方格圖-----
+function drawChart(
+  _xOrigin,  // 圖表原點位置
+  _yOrigin, 
+  _xPixels,  // XY 軸刻度間距像素
+  _yPixels,  
+  _xStep,    // XY 軸刻度值間隔
+  _yStep, 
+  _xStart,   // XY 軸刻度值啟始值
+  _yStart, 
+  _txtSize   // 刻度文字大小
+) {
+  xOrigin = _xOrigin;
+  yOrigin = _yOrigin;
+  xPixels = _xPixels;
+  yPixels = _yPixels;
+  xStep = _xStep;
+  yStep = _yStep;
+  xStart = _xStart;
+  yStart = _yStart;
+  txtSize = _txtSize;
 
-    function windowResized() {
-      let calcW = Math.min(windowWidth - 20, 640);
-      let calcH = Math.round(calcW * (480 / 640));
-      resizeCanvas(calcW, calcH);
-    }
+  textSize(txtSize);
+  // 標出 X 軸數值
+  for (
+    let x = xOrigin, v = xStart;
+    x <= width - xPixels;
+    x += xPixels, v += xStep
+  ) {
+    text(v, x - txtSize / 2, yOrigin + txtSize);
+    // 畫出 Y 軸線
+    line(x, yOrigin, x, 0);
+  }
+  // 標出 Y 軸數值
+  for (let y = yOrigin, v = yStart; y >= yPixels; y -= yPixels, v += yStep) {
+    text(v, xOrigin - txtSize * 2, y + txtSize / 2);
+    // 畫出 X 軸線
+    line(xOrigin, y, width, y);
+  }
+}
 
-    function draw() {
-      background(15);
+// 在圖表上指定座標繪製半徑 10 像素的圓點
+function drawPoint(x, y, sz) {
+  x = int(((x - xStart) * xPixels) / xStep) + xOrigin;
+  y = yOrigin - int(((y - yStart) * yPixels) / yStep);
+  ellipse(x, y, sz, sz);
+}
 
-      // 1. 繪製攝影機畫面（水平鏡像翻轉，如同後照鏡）
-      if (isCameraReady && videoElement) {
-        push();
-        translate(width, 0);
-        scale(-1, 1);
-        drawingContext.drawImage(videoElement, 0, 0, width, height);
-        pop();
-      }
+function drawRectangle(x, y, sz) {
+  x = int(((x - xStart) * xPixels) / xStep) + xOrigin;
+  y = yOrigin - int(((y - yStart) * yPixels) / yStep);
+  noStroke();
+  rectMode(CENTER);
+  rect(x, y, sz, sz);
+}
 
-      // 2. 繪製網格特徵點
-      drawKeypoints();   
-      
-      // 3. 頂部狀態列背景遮罩
-      push();
-      fill(0, 0, 0, 190);
-      rect(0, 0, width, 60);
-      pop();
+//-----在指定位置繪製圖片按鈕-----
+function guiImgButton(
+  src, // 圖檔來源
+  x,   // 按鈕位置
+  y,   
+  sz,  // 按鈕大小
+  cb,  // 事件處理函式
+  alt  // 替代文字
+) {
+  alt = (alt === undefined) ? "" : alt;
+  btn = createImg(src, alt);
+  btn.position(x, y);
+  btn.size(sz, sz);
+  btn.mousePressed(cb);
+}
 
-      // 4. 文字狀態顯示
-      push();
-      textAlign(CENTER, CENTER);
+// 畫面左右翻轉
+function xFlip(video) {
+  push(); // 開始新的畫圖狀態(避免文字也被翻轉)
+  // 將起始點更改為右上角
+  translate(video.width, 0);
+  // 根據 X 軸翻轉
+  scale(-1, 1);
+  // (影像, 起始x點, 起始y點, 影像寬度, 影像高度)
+  image(video, 0, 0, 640, 480);
+  pop(); // 恢復舊的畫圖狀態(避免文字也被翻轉)
+}
 
-      if (!isFaceMeshReady || !isModelReady) {
-        fill(255, 200, 0);
-        textSize(18);
-        let msg = !isFaceMeshReady ? "⏳ 臉部模型初始化中..." : "⏳ AI 分類模型下載中...";
-        text(msg, width / 2, 30);
-      } else if (predictLabel == "打瞌睡") {
-        fill(255, 60, 60);
-        textSize(24);
-        textStyle(BOLD);
-        text("🚨 警告：偵測到打瞌睡 (" + confidenceVal + "%)", width / 2, 30);
-      } else if (predictLabel == "未偵測到人臉") {
-        fill(180, 180, 180);
-        textSize(20);
-        text("👤 請將臉部對準鏡頭", width / 2, 30);
-      } /*else if (predictLabel == "載入中...") {
-        fill(255, 220, 0);
-        textSize(18);
-        text("⏳ AI 分析推論中...", width / 2, 30);
-      } */else {
-        fill(50, 230, 120);
-        textSize(22);
-        textStyle(BOLD);
-        text("🟢 狀態：" + predictLabel + " (" + confidenceVal + "%)", width / 2, 30);
-      }
-      pop();
-    }
+function guiSlider(minVal, maxVal, sz, step) {
+  sz = (sz === undefined) ? 640:sz;
+  step = (step === undefined) ? 1:step;
+  // 建立滑軌(最小值,最大值,間距)
+  slider = createSlider(minVal, maxVal, (minVal + maxVal) / 2, step);
+  slider.style("width", sz + "px");
+  return slider;
+}
+
+let btnP = null;
+function guiButton(lab, fun, sz) {
+  sz = (sz === undefined) ? 20:sz;
+  let btn = createButton(lab);
+  btn.size(100, 50);
+  btn.style("font-size", sz + "px");
+  if (!btnP) btnP = createP();
+  btnP.child(btn);
+  btn.mousePressed(fun);
+  return btn;
+}
+
+function guiText(txt, sz) {
+  sz = (sz === undefined) ? 24:sz;
+
+  // 創建 文字
+  let p = createP(txt);
+  p.style("font-size", sz + "px");
+  return p;
+}
+
+let snapshotBars = {
+  bars: [],
+  addBar: (y, r, g, b, w, h) => {
+    snapshotBars.bars.push({
+      y: y,
+      w: w,
+      h: h,
+      count: 0,
+    }); // w, h, count
+    fill(r, g, b);
+    rect(0, y, width, h * 2, 5);
+    return snapshotBars.bars.length - 1;
+  },
+  count: (n) => {
+    return snapshotBars.bars[n].count;
+  },
+  addSnapshot: (img, n) => {
+    y = snapshotBars.bars[n].y;
+    w = snapshotBars.bars[n].w;
+    h = snapshotBars.bars[n].h;
+    count = snapshotBars.bars[n].count;
+    let nSnaps = int(width / w); // 每列縮圖數
+    let row = int(count / nSnaps) % 2;
+    let col = count % nSnaps;
+    image(img, col * w, y + row * h, w, h);
+    snapshotBars.bars[n].count++;
+  },
+};
+ 
   </script>
-</body>
+  <body>    
+  </body>
 </html>
