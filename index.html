@@ -2,21 +2,20 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>AI ç–²å‹é§•é§›ç›£æ§ç³»çµ±v8</title>
+  <title>AI ¯h³Ò¾r¾pºÊ±±¨t²Î (GAS ¶³ºİª©)</title>
   
-  <!-- 1. TensorFlow.js Core & Backend -->
+  <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu"></script>
   
-  <!-- 2. Google å®˜æ–¹ Face Landmarks Detection -->
+  <!-- Google Face Landmarks Detection -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
   
-  <!-- 3. p5.js, ml5.js & MQTT.js -->
+  <!-- p5.js & ml5.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
   <script src="https://unpkg.com/ml5@0.6.0/dist/ml5.min.js"></script>
-  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
   <style>
     html, body {
@@ -44,39 +43,33 @@
 </head>
 <body>
 
-  <h2>ğŸš¨ ç–²å‹é§•é§› AI åµæ¸¬ç³»çµ±</h2>
+  <h2>?? ¯h³Ò¾r¾p AI °»´ú¨t²Î</h2>
   
   <div id="canvas-container"></div>
   <video id="webcam-video" width="640" height="480" autoplay playsinline muted></video>
 
   <script>
+    // ?? ¶K¤W§Aªº GAS ³¡¸pºô§} (»İ¥]§t /exec)
     const gasUrl = "https://script.google.com/macros/s/AKfycbyGFrd3VqxAZ6vRGvWF-s4mzrSKas1gM0af09G6-_TXUEvJdNFUKYKM_jBDi8Eb1HHs/exec";
-
-    // --------- MQTT è¨­å®š ---------
-    let client;
-    let connectMQTT = false;
-    let mqttUsername = "we1688";
-    let mqttPassword = "aio_QPfP05UOUn7pTKEh6Qjp9EIPQ9Mh";
-    let mqttTopic = mqttUsername + "/feeds/alarm";
 
     let videoElement;
     let faceDetector;
     let keypointsList = []; 
-    let predictLabel = "ç­‰å¾… AI æ¨è«–ä¸­...";
+    let predictLabel = "µ¥«İ AI ±À½×¤¤...";
     let confidenceVal = "0";
     let nn;
     
     let isCameraReady = false;
     let isFaceMeshReady = false;
     let isModelReady = false;
-    let isPredicting = false; // é˜²æ­¢é‡è¤‡æ¨è«–å¡æ­»
+    let isPredicting = false;
 
     let lastLabel = "";
     let videoSizeW = 640;
     let videoSizeH = 480;
 
-    let userLat = "ç„¡";
-    let userLng = "ç„¡";
+    let userLat = "µL";
+    let userLng = "µL";
 
     function updatePhoneLocation() {
       if ("geolocation" in navigator) {
@@ -84,37 +77,27 @@
           (position) => {
             userLat = position.coords.latitude.toFixed(6);
             userLng = position.coords.longitude.toFixed(6);
-            console.log(`ğŸ“± GPS å®šä½æˆåŠŸ: ${userLat}, ${userLng}`);
+            console.log(`?? GPS ©w¦ì¦¨¥\: ${userLat}, ${userLng}`);
           },
-          (error) => console.warn("âš ï¸ å®šä½å¤±æ•—: ", error.message),
+          (error) => console.warn("?? ©w¦ì¥¢±Ñ: ", error.message),
           { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
         );
       }
     }
 
     function sendToGAS(status) {
-      if (!gasUrl || gasUrl.includes("ä½ çš„_DEPLOYMENT_ID")) return;
+      if (!gasUrl || gasUrl.includes("§Aªº_DEPLOYMENT_ID")) return;
       let payloadData = { status: status, lat: userLat, lng: userLng };
+      
       fetch(gasUrl, {
         method: "POST",
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify(payloadData)
       })
-      .then(() => console.log(`âœ… ç‹€æ…‹ [${status}] å·²åŒæ­¥è‡³ GASï¼`))
-      .catch(err => console.error("âŒ åŒæ­¥ GAS å¤±æ•—:", err));
+      .then(() => console.log(`? ª¬ºA [${status}] ¤w¦P¨B¦Ü Google ¸Õºâªí (GAS)¡I`))
+      .catch(err => console.error("? ¦P¨B GAS ¥¢±Ñ:", err));
     }
 
-    function mqttSetup() {
-      let mqttOptions = { username: mqttUsername, password: mqttPassword };
-      client = mqtt.connect("wss://io.adafruit.com:443", mqttOptions);
-      client.on("connect", () => {
-        console.log("âœ… å·²é€£ç·š Adafruit IO MQTTï¼");
-        connectMQTT = true;
-      });
-      client.on("error", (err) => console.error("âŒ MQTT éŒ¯èª¤:", err));
-    }
-
-    // åš´æ ¼æ¸…æ´—ç‰¹å¾µé»æ•¸æ“šç‚º 1044 é•·åº¦çš„ç´”æ•¸å­—é™£åˆ—
     function getCleanInputData() {
       let inputData = [];
       let count = Math.min(keypointsList.length, 348);
@@ -124,7 +107,6 @@
         inputData.push(typeof pt.y === 'number' ? pt.y : 0);
         inputData.push(typeof pt.z === 'number' ? pt.z : 0);
       }
-      // è£œé½Šè‡³ 1044 é•·åº¦
       while (inputData.length < 1044) {
         inputData.push(0);
       }
@@ -132,7 +114,6 @@
     }
 
     function predictData() {
-      // ç¢ºä¿æ¨¡å‹å°±ç·’ã€æœ‰ç‰¹å¾µé»ä¸”ç•¶å‰æ²’æœ‰æ­£åœ¨åŸ·è¡Œçš„æ¨è«–
       if (isModelReady && keypointsList.length > 0 && !isPredicting) {
         isPredicting = true;
         let inputs = getCleanInputData();
@@ -142,27 +123,20 @@
 
     function checkStatus(){
       if(predictLabel !== lastLabel){
-        console.log("ğŸ”„ ç‹€æ…‹è®Šæ›´: " + predictLabel);
-        if (predictLabel === "æ‰“çŒç¡") updatePhoneLocation();
-        
+        console.log("?? ª¬ºAÅÜ§ó: " + predictLabel);
+        if (predictLabel === "¥´½OºÎ") updatePhoneLocation();
         sendToGAS(predictLabel);
-
-        if (connectMQTT && client) {
-          client.publish(mqttTopic, predictLabel);
-          console.log("ğŸ“¡ ç™¼é€ MQTT: " + predictLabel);
-        }
         lastLabel = predictLabel;
       }
     }
 
     function gotResults(error, results) {
-      isPredicting = false; // è§£é™¤æ¨è«–é–å®š
+      isPredicting = false;
       if (error) {
-        console.error("âŒ åˆ†é¡æ¨è«–å¤±æ•—:", error);
+        console.error("? ¤ÀÃş±À½×¥¢±Ñ:", error);
         return;
       }
       if (results && results.length > 0) {
-        // å–å¾—æ©Ÿç‡æœ€é«˜çš„æ¨™ç±¤èˆ‡ä¿¡å¿ƒå€¼
         predictLabel = String(results[0].label).trim();
         confidenceVal = (results[0].confidence * 100).toFixed(0);
         checkStatus();
@@ -170,7 +144,7 @@
     }
 
     function uploadModel() {
-      console.log("â³ ä¸‹è¼‰ GitHub è‡ªè¨‚ AI åˆ†é¡æ¨¡å‹...");
+      console.log("? ¤U¸ü AI ¤ÀÃş¼Ò«¬...");
       const modelInfo = {
         model: 'model.json',
         metadata: 'model_meta.json',
@@ -178,7 +152,7 @@
       };
       
       nn.load(modelInfo, () => {
-        console.log('âœ… GitHub AI åˆ†é¡æ¨¡å‹è®€å–å®Œæˆï¼');
+        console.log('? AI ¤ÀÃş¼Ò«¬¸ü¤J§¹¦¨¡I');
         isModelReady = true;
       });
     }
@@ -202,15 +176,15 @@
           const faces = await faceDetector.estimateFaces(videoElement, { flipHorizontal: false });
           if (faces.length > 0) {
             keypointsList = faces[0].keypoints;
-            predictData(); // å˜—è©¦é€²è¡Œ AI åˆ†é¡æ¨è«–
+            predictData();
           } else {
             keypointsList = [];
-            predictLabel = "æœªåµæ¸¬åˆ°äººè‡‰";
+            predictLabel = "¥¼°»´ú¨ì¤HÁy";
             confidenceVal = "0";
             checkStatus();
           }
         } catch (e) {
-          console.warn("âš ï¸ åµæ¸¬é‡éšœ:", e);
+          console.warn("?? °»´ú¹J»Ù:", e);
         }
       }
       requestAnimationFrame(renderFaceMesh);
@@ -245,12 +219,11 @@
           faceDetector = await faceLandmarksDetection.createDetector(model, detectorConfig);
           isFaceMeshReady = true;
           
-          // FaceMesh æº–å‚™å¥½å¾Œå†é–‹å§‹ç¹ªè£½èˆ‡è¼‰å…¥æ¨¡å‹
           uploadModel(); 
           renderFaceMesh(); 
         };
       } catch (err) {
-        alert("âš ï¸ è«‹æˆæ¬Šæ”å½±æ©Ÿå­˜å–ï¼");
+        alert("?? ½Ğ±ÂÅvÄá¼v¾÷¦s¨ú¡I");
       }
     }
 
@@ -260,7 +233,6 @@
 
       updatePhoneLocation();
 
-      // åˆå§‹åŒ– ml5 ç¥ç¶“ç¶²è·¯
       const options = {
         inputs: 1044,
         outputs: 2,
@@ -269,51 +241,45 @@
       };
       
       nn = ml5.neuralNetwork(options);
-
-      mqttSetup();
       initCameraAndFaceMesh();
     }
 
     function draw() {
       background(0);
 
-      // 1. ç¹ªè£½æ”å½±æ©Ÿç•«é¢
       if (isCameraReady && videoElement) {
         drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
       }
 
-      // 2. ç¹ªè£½ç¶ è‰²ç‰¹å¾µé»
       drawKeypoints();   
       
-      // 3. é ‚éƒ¨é»‘è‰²æ¢ç‹€é®ç½©
       push();
       fill(0, 0, 0, 180);
       rect(0, 0, width, 70);
       pop();
 
-      // 4. æ–‡å­—é¡¯ç¤º
       push();
       textAlign(CENTER, CENTER);
 
       if (!isFaceMeshReady || !isModelReady) {
         fill(255, 255, 0);
         textSize(22);
-        let msg = !isFaceMeshReady ? "â³ FaceMesh æ¨¡å‹è¼‰å…¥ä¸­..." : "â³ AI åˆ†é¡æ¨¡å‹ä¸‹è¼‰ä¸­...";
+        let msg = !isFaceMeshReady ? "? FaceMesh ¼Ò«¬¸ü¤J¤¤..." : "? AI ¤ÀÃş¼Ò«¬¤U¸ü¤¤...";
         text(msg, width / 2, 35);
-      } else if (predictLabel === "æ‰“çŒç¡") {
+      } else if (predictLabel === "¥´½OºÎ") {
         fill(255, 50, 50);
         textSize(30);
         textStyle(BOLD);
-        text("âš ï¸ è­¦å‘Šï¼šæ‰“çŒç¡ä¸­ï¼ (" + confidenceVal + "%)", width / 2, 35);
-      } else if (predictLabel === "æœªåµæ¸¬åˆ°äººè‡‰") {
+        text("?? Äµ§i¡G¥´½OºÎ¤¤¡I (" + confidenceVal + "%)", width / 2, 35);
+      } else if (predictLabel === "¥¼°»´ú¨ì¤HÁy") {
         fill(200, 200, 200);
         textSize(26);
-        text("ğŸ‘¤ è«‹å°‡è‡‰éƒ¨å°æº–é¡é ­", width / 2, 35);
+        text("?? ½Ğ±NÁy³¡¹ï·ÇÃèÀY", width / 2, 35);
       } else {
         fill(0, 255, 127);
         textSize(28);
         textStyle(BOLD);
-        text("ğŸŸ¢ ç‹€æ…‹ï¼š" + predictLabel + " (" + confidenceVal + "%)", width / 2, 35);
+        text("?? ª¬ºA¡G" + predictLabel + " (" + confidenceVal + "%)", width / 2, 35);
       }
       pop();
     }
