@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)13:41</title>
+  <title>AI 疲勞駕駛監控系統 (GAS 雲端版)14:23</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -95,13 +95,13 @@
       if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       }
-      if (audioCtx.state === 'suspended') {
+      if (audioCtx.state == 'suspended') {
         audioCtx.resume();
       }
 
       if (!alarmInterval) {
         alarmInterval = setInterval(() => {
-          if (predictLabel === "打瞌睡") {
+          if (predictLabel == "打瞌睡") {
             let osc = audioCtx.createOscillator();
             let gain = audioCtx.createGain();
             osc.type = 'sawtooth';
@@ -154,12 +154,12 @@
       if (!gasUrl || gasUrl.includes("你的_DEPLOYMENT_ID")) return;
 
       const now = Date.now();
-      if (now - lastGasSendTime < GAS_COOLDOWN_MS && status === lastLabel) {
+      if (now - lastGasSendTime < GAS_COOLDOWN_MS && status == lastLabel) {
         return; // 防暴衝節流
       }
       lastGasSendTime = now;
       
-      if (userLat === "無") {
+      if (userLat == "無") {
         updatePhoneLocation(() => executeGASPost(status));
       } else {
         executeGASPost(status);
@@ -183,9 +183,9 @@
       
       for (let i = 0; i < count; i++) {
         let pt = keypointsList[i];
-        let x = (pt && typeof pt.x === 'number' && !isNaN(pt.x)) ? pt.x : 0;
-        let y = (pt && typeof pt.y === 'number' && !isNaN(pt.y)) ? pt.y : 0;
-        let z = (pt && typeof pt.z === 'number' && !isNaN(pt.z)) ? pt.z : 0;
+        let x = (pt && typeof pt.x == 'number' && !isNaN(pt.x)) ? pt.x : 0;
+        let y = (pt && typeof pt.y == 'number' && !isNaN(pt.y)) ? pt.y : 0;
+        let z = (pt && typeof pt.z == 'number' && !isNaN(pt.z)) ? pt.z : 0;
         
         inputData.push(x, y, z);
       }
@@ -211,7 +211,7 @@
     }
 
     function checkStatus(rawLabel){
-      if (rawLabel === pendingLabel) {
+      if (rawLabel == pendingLabel) {
         labelCount++;
       } else {
         pendingLabel = rawLabel;
@@ -222,11 +222,11 @@
         predictLabel = pendingLabel;
         
         // 觸發蜂鳴警報
-        if (predictLabel === "打瞌睡") {
+        if (predictLabel == "打瞌睡") {
           playAlarmSound();
         }
 
-        if(predictLabel !== lastLabel && predictLabel !== "載入中..."){
+        if(predictLabel != lastLabel && predictLabel != "載入中..."){
           console.log("🔄 狀態確認變更: " + predictLabel);
           sendToGAS(predictLabel);
           lastLabel = predictLabel;
@@ -410,16 +410,16 @@
         textSize(18);
         let msg = !isFaceMeshReady ? "⏳ 臉部模型初始化中..." : "⏳ AI 分類模型下載中...";
         text(msg, width / 2, 30);
-      } else if (predictLabel === "打瞌睡") {
+      } else if (predictLabel == "打瞌睡") {
         fill(255, 60, 60);
         textSize(24);
         textStyle(BOLD);
         text("🚨 警告：偵測到打瞌睡 (" + confidenceVal + "%)", width / 2, 30);
-      } else if (predictLabel === "未偵測到人臉") {
+      } else if (predictLabel == "未偵測到人臉") {
         fill(180, 180, 180);
         textSize(20);
         text("👤 請將臉部對準鏡頭", width / 2, 30);
-      } else if (predictLabel === "載入中...") {
+      } else if (predictLabel == "載入中...") {
         fill(255, 220, 0);
         textSize(18);
         text("⏳ AI 分析推論中...", width / 2, 30);
