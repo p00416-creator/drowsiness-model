@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>AI ¯h³Ò¾r¾pºÊ±±¨t²Î (GAS ¶³ºİª©)</title>
+  <title>AI ç–²å‹é§•é§›ç›£æ§ç³»çµ± (GAS é›²ç«¯ç‰ˆ)</title>
   
   <!-- TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
@@ -43,19 +43,19 @@
 </head>
 <body>
 
-  <h2>?? ¯h³Ò¾r¾p AI °»´ú¨t²Î</h2>
+  <h2>?? ç–²å‹é§•é§› AI åµæ¸¬ç³»çµ±</h2>
   
   <div id="canvas-container"></div>
   <video id="webcam-video" width="640" height="480" autoplay playsinline muted></video>
 
   <script>
-    // ?? ¶K¤W§Aªº GAS ³¡¸pºô§} (»İ¥]§t /exec)
-    const gasUrl = "https://script.google.com/macros/s/AKfycbyGFrd3VqxAZ6vRGvWF-s4mzrSKas1gM0af09G6-_TXUEvJdNFUKYKM_jBDi8Eb1HHs/exec";
+    // ?? è²¼ä¸Šä½ çš„ GAS éƒ¨ç½²ç¶²å€ (éœ€åŒ…å« /exec)
+    const gasUrl = "https://script.google.com/macros/s/AKfycbzR-0dO8nyrTmckOUljWXDD8whv9hJMPxmgRJaBzqZBUgR5zPt52Og26LgbGh1vCjSCZQ/exec";
 
     let videoElement;
     let faceDetector;
     let keypointsList = []; 
-    let predictLabel = "µ¥«İ AI ±À½×¤¤...";
+    let predictLabel = "ç­‰å¾… AI æ¨è«–ä¸­...";
     let confidenceVal = "0";
     let nn;
     
@@ -68,8 +68,8 @@
     let videoSizeW = 640;
     let videoSizeH = 480;
 
-    let userLat = "µL";
-    let userLng = "µL";
+    let userLat = "ç„¡";
+    let userLng = "ç„¡";
 
     function updatePhoneLocation() {
       if ("geolocation" in navigator) {
@@ -77,16 +77,16 @@
           (position) => {
             userLat = position.coords.latitude.toFixed(6);
             userLng = position.coords.longitude.toFixed(6);
-            console.log(`?? GPS ©w¦ì¦¨¥\: ${userLat}, ${userLng}`);
+            console.log(`?? GPS å®šä½æˆåŠŸ: ${userLat}, ${userLng}`);
           },
-          (error) => console.warn("?? ©w¦ì¥¢±Ñ: ", error.message),
+          (error) => console.warn("?? å®šä½å¤±æ•—: ", error.message),
           { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
         );
       }
     }
 
     function sendToGAS(status) {
-      if (!gasUrl || gasUrl.includes("§Aªº_DEPLOYMENT_ID")) return;
+      if (!gasUrl || gasUrl.includes("ä½ çš„_DEPLOYMENT_ID")) return;
       let payloadData = { status: status, lat: userLat, lng: userLng };
       
       fetch(gasUrl, {
@@ -94,8 +94,8 @@
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify(payloadData)
       })
-      .then(() => console.log(`? ª¬ºA [${status}] ¤w¦P¨B¦Ü Google ¸Õºâªí (GAS)¡I`))
-      .catch(err => console.error("? ¦P¨B GAS ¥¢±Ñ:", err));
+      .then(() => console.log(`? ç‹€æ…‹ [${status}] å·²åŒæ­¥è‡³ Google è©¦ç®—è¡¨ (GAS)ï¼`))
+      .catch(err => console.error("? åŒæ­¥ GAS å¤±æ•—:", err));
     }
 
     function getCleanInputData() {
@@ -123,8 +123,8 @@
 
     function checkStatus(){
       if(predictLabel !== lastLabel){
-        console.log("?? ª¬ºAÅÜ§ó: " + predictLabel);
-        if (predictLabel === "¥´½OºÎ") updatePhoneLocation();
+        console.log("?? ç‹€æ…‹è®Šæ›´: " + predictLabel);
+        if (predictLabel === "æ‰“çŒç¡") updatePhoneLocation();
         sendToGAS(predictLabel);
         lastLabel = predictLabel;
       }
@@ -133,7 +133,7 @@
     function gotResults(error, results) {
       isPredicting = false;
       if (error) {
-        console.error("? ¤ÀÃş±À½×¥¢±Ñ:", error);
+        console.error("? åˆ†é¡æ¨è«–å¤±æ•—:", error);
         return;
       }
       if (results && results.length > 0) {
@@ -144,7 +144,7 @@
     }
 
     function uploadModel() {
-      console.log("? ¤U¸ü AI ¤ÀÃş¼Ò«¬...");
+      console.log("? ä¸‹è¼‰ AI åˆ†é¡æ¨¡å‹...");
       const modelInfo = {
         model: 'model.json',
         metadata: 'model_meta.json',
@@ -152,7 +152,7 @@
       };
       
       nn.load(modelInfo, () => {
-        console.log('? AI ¤ÀÃş¼Ò«¬¸ü¤J§¹¦¨¡I');
+        console.log('? AI åˆ†é¡æ¨¡å‹è¼‰å…¥å®Œæˆï¼');
         isModelReady = true;
       });
     }
@@ -179,12 +179,12 @@
             predictData();
           } else {
             keypointsList = [];
-            predictLabel = "¥¼°»´ú¨ì¤HÁy";
+            predictLabel = "æœªåµæ¸¬åˆ°äººè‡‰";
             confidenceVal = "0";
             checkStatus();
           }
         } catch (e) {
-          console.warn("?? °»´ú¹J»Ù:", e);
+          console.warn("?? åµæ¸¬é‡éšœ:", e);
         }
       }
       requestAnimationFrame(renderFaceMesh);
@@ -223,7 +223,7 @@
           renderFaceMesh(); 
         };
       } catch (err) {
-        alert("?? ½Ğ±ÂÅvÄá¼v¾÷¦s¨ú¡I");
+        alert("?? è«‹æˆæ¬Šæ”å½±æ©Ÿå­˜å–ï¼");
       }
     }
 
@@ -264,22 +264,22 @@
       if (!isFaceMeshReady || !isModelReady) {
         fill(255, 255, 0);
         textSize(22);
-        let msg = !isFaceMeshReady ? "? FaceMesh ¼Ò«¬¸ü¤J¤¤..." : "? AI ¤ÀÃş¼Ò«¬¤U¸ü¤¤...";
+        let msg = !isFaceMeshReady ? "? FaceMesh æ¨¡å‹è¼‰å…¥ä¸­..." : "? AI åˆ†é¡æ¨¡å‹ä¸‹è¼‰ä¸­...";
         text(msg, width / 2, 35);
-      } else if (predictLabel === "¥´½OºÎ") {
+      } else if (predictLabel === "æ‰“çŒç¡") {
         fill(255, 50, 50);
         textSize(30);
         textStyle(BOLD);
-        text("?? Äµ§i¡G¥´½OºÎ¤¤¡I (" + confidenceVal + "%)", width / 2, 35);
-      } else if (predictLabel === "¥¼°»´ú¨ì¤HÁy") {
+        text("?? è­¦å‘Šï¼šæ‰“çŒç¡ä¸­ï¼ (" + confidenceVal + "%)", width / 2, 35);
+      } else if (predictLabel === "æœªåµæ¸¬åˆ°äººè‡‰") {
         fill(200, 200, 200);
         textSize(26);
-        text("?? ½Ğ±NÁy³¡¹ï·ÇÃèÀY", width / 2, 35);
+        text("?? è«‹å°‡è‡‰éƒ¨å°æº–é¡é ­", width / 2, 35);
       } else {
         fill(0, 255, 127);
         textSize(28);
         textStyle(BOLD);
-        text("?? ª¬ºA¡G" + predictLabel + " (" + confidenceVal + "%)", width / 2, 35);
+        text("?? ç‹€æ…‹ï¼š" + predictLabel + " (" + confidenceVal + "%)", width / 2, 35);
       }
       pop();
     }
