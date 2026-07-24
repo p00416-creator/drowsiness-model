@@ -2,9 +2,9 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>AI 疲勞駕駛監控系統v3</title>
+  <title>AI 疲勞駕駛監控系統v6</title>
   
-  <!-- 1. TensorFlow.js Core & WebGL/CPU -->
+  <!-- 1. TensorFlow.js Core & Backend -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
@@ -50,7 +50,7 @@
   <video id="webcam-video" width="640" height="480" autoplay playsinline muted></video>
 
   <script>
-    const gasUrl = "https://script.google.com/macros/s/你的_DEPLOYMENT_ID/exec";
+    const gasUrl = "https://script.google.com/macros/s/AKfycbyGFrd3VqxAZ6vRGvWF-s4mzrSKas1gM0af09G6-_TXUEvJdNFUKYKM_jBDi8Eb1HHs/exec";
 
     // --------- MQTT 設定 ---------
     let client;
@@ -62,9 +62,8 @@
     let videoElement;
     let faceDetector;
     let keypointsList = []; 
-    let predictLabel = "等待 AI 推理中...";
+    let predictLabel = "等待 AI 推論中...";
     let confidenceVal = "0";
-    let rawDebugText = "";
     let nn;
     
     let isCameraReady = false;
@@ -114,14 +113,17 @@
       client.on("error", (err) => console.error("❌ MQTT 錯誤:", err));
     }
 
-    function getCurrentData() {
+    // 💡 關鍵修正：嚴格清洗特徵點數據為 1044 長度的純數字陣列
+    function getCleanInputData() {
       let inputData = [];
       let count = Math.min(keypointsList.length, 348);
       for (let i = 0; i < count; i++) {
-        inputData.push(keypointsList[i].x);
-        inputData.push(keypointsList[i].y);
-        inputData.push(keypointsList[i].z || 0);
+        let pt = keypointsList[i];
+        inputData.push(Number(pt.x) || 0);
+        inputData.push(Number(pt.y) || 0);
+        inputData.push(Number(pt.z) || 0);
       }
+      // 補齊至 1044 長度
       while (inputData.length < 1044) {
         inputData.push(0);
       }
@@ -130,10 +132,9 @@
 
     function predictData() {
       if (isModelReady && keypointsList.length > 0) {
-        let currentInputs = getCurrentData();
-        if (currentInputs.length === 1044) {
-          nn.classify(currentInputs, gotResults);
-        }
+        let inputs = getCleanInputData();
+        // 直接傳入標準一維陣列
+        nn.classify(inputs, gotResults);
       }
     }
 
@@ -154,12 +155,12 @@
 
     function gotResults(error, results) {
       if (error) {
-        console.error("❌ 分類異常:", error);
+        console.error("❌ 分類推論失敗:", error);
         return;
       }
       if (results && results.length > 0) {
-        rawDebugText = results[0].label;
-        predictLabel = results[0].label;
+        // 取得機率最高的標籤與信心值
+        predictLabel = String(results[0].label).trim();
         confidenceVal = (results[0].confidence * 100).toFixed(0);
         checkStatus();
       }
@@ -201,6 +202,7 @@
           } else {
             keypointsList = [];
             predictLabel = "未偵測到人臉";
+            confidenceVal = "0";
           }
         } catch (e) {
           console.warn("⚠️ 偵測遇障:", e);
@@ -267,40 +269,42 @@
     function draw() {
       background(0);
 
-      // 1. 鏡頭影像
+      // 1. 繪製攝影機畫面
       if (isCameraReady && videoElement) {
         drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
       }
 
-      // 2. 螢光綠特徵點
+      // 2. 繪製綠色網格
       drawKeypoints();   
       
-      // 3. 頂部黑色底區塊（確保文字永遠可讀）
+      // 3. 頂部黑色條狀遮罩
       push();
       fill(0, 0, 0, 180);
       rect(0, 0, width, 70);
       pop();
 
-      // 4. 強制狀態文字渲染
+      // 4. 文字顯示（無視狀態強制渲染）
+      push();
       textAlign(CENTER, CENTER);
 
       if (!isFaceMeshReady || !isModelReady) {
         fill(255, 255, 0);
         textSize(22);
-        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 分類模型下載中...";
+        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 模型下載中...";
         text(msg, width / 2, 35);
       } else if (predictLabel === "打瞌睡") {
         fill(255, 50, 50);
-        textSize(32);
+        textSize(30);
         textStyle(BOLD);
         text("⚠️ 警告：打瞌睡中！ (" + confidenceVal + "%)", width / 2, 35);
       } else {
-        // 清醒 / 正常 / 其它任何非打瞌睡狀態
+        // 🟢 只要不是「打瞌睡」，無條件顯示當前標籤與信心度
         fill(0, 255, 127);
         textSize(28);
         textStyle(BOLD);
         text("🟢 狀態：" + predictLabel + " (" + confidenceVal + "%)", width / 2, 35);
       }
+      pop();
     }
   </script>
 </body>
