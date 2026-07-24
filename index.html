@@ -267,31 +267,51 @@
       initCameraAndFaceMesh();
     }
 
-    function draw() {
-      background(0);
+   function draw() {
+  background(0);
 
-      if (isCameraReady && videoElement) {
-        drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
-      }
+  // 1. 繪製攝影機畫面
+  if (isCameraReady && videoElement) {
+    drawingContext.drawImage(videoElement, 0, 0, videoSizeW, videoSizeH);
+  }
 
-      drawKeypoints();   
-      
-      textAlign(CENTER, CENTER);
-      if (predictLabel === "打瞌睡") {
-        fill(255, 50, 50);
-        textSize(60);
-        textStyle(BOLD);
-        text("⚠️ 請保持清醒！", width / 2, height / 3);
-      } else if (!isFaceMeshReady || !isModelReady) {
-        fill(0, 0, 0, 180);
-        rect(0, 0, width, height);
-        
-        fill(255, 255, 0);
-        textSize(28);
-        let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 模型下載中...";
-        text(msg, width / 2, height / 2);
-      }
-    }
+  // 2. 繪製螢光綠色網格
+  drawKeypoints();   
+  
+  // 3. 顯示 UI 文字與辨識狀態
+  textAlign(CENTER, CENTER);
+
+  if (!isFaceMeshReady || !isModelReady) {
+    // 載入中半透明遮罩
+    fill(0, 0, 0, 180);
+    rect(0, 0, width, height);
+    
+    fill(255, 255, 0);
+    textSize(28);
+    let msg = !isFaceMeshReady ? "⏳ FaceMesh 模型載入中..." : "⏳ AI 模型下載中...";
+    text(msg, width / 2, height / 2);
+
+  } else if (predictLabel === "打瞌睡") {
+    // 🚨 疲勞警報 (紅色)
+    fill(255, 50, 50);
+    textSize(50);
+    textStyle(BOLD);
+    text("⚠️ 請保持清醒！", width / 2, 80);
+
+  } else if (predictLabel !== "") {
+    // ✅ 清醒 / 正常狀態 (綠色)
+    fill(0, 255, 127);
+    textSize(36);
+    textStyle(BOLD);
+    text("🟢 狀態：" + predictLabel, width / 2, 60);
+
+  } else {
+    // 👤 未偵測到人臉或辨識中
+    fill(200);
+    textSize(24);
+    text("🔍 正在對焦人臉...", width / 2, 50);
+  }
+}
   </script>
 </body>
 </html>
