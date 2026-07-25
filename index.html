@@ -1,311 +1,368 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
+<html>
   <head>
     <meta charset="UTF-8" />
-    <title>Nod off Alarm1108</title>
+    <title>Nod off Alarm</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/0.9.0/p5.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/0.9.0/addons/p5.dom.min.js"></script>
     <script src="https://unpkg.com/ml5@0.6.1/dist/ml5.min.js" type="text/javascript"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
-    <style>
-      body {
-        margin: 0;
-        padding: 20px;
-        background-color: #1e1e1e;
-        color: #fff;
-        font-family: Arial, sans-serif;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        flex-direction: column;
-      }
-      canvas {
-        border-radius: 10px;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-      }
-    </style>
+    <style></style>
   </head>
 
   <script>
   let video;
-  let facemesh;
-  let predictLabel = "清醒";       // 預測標籤（預設清醒）
-  let predictions = [];            // 臉部偵測節點資訊
-  let nn;                          // 神經網路
-  let loading = false;             // 載入狀態
-  let videoSizeW = 640;            // 影像寬度
-  let videoSizeH = 480;            // 影像高度
-  let labels = ['打瞌睡', '清醒'];
+let facemesh;
+let predictLabel = "清醒";       // 預測標籤（預設清醒）
+let predictions = [];           // 臉部偵測節點資訊
+let nn;                         // 神經網路
+let loading = false;            // 載入狀態
+let lastLabel;                  // 前一個發送的預測結果
+let videoSizeW = 640;           // 影像寬度
+let videoSizeH = 480;           // 影像高度
+let labels = ['打瞌睡', '清醒'];
 
-  // --------- 效能與防誤判機制設定 ---------
-  let isPredicting = false;        // 神經網路推論鎖（防止請求堆疊）
-  let drowsyCounter = 0;          // 打瞌睡連續幀數計數器
-  const DROWSY_THRESHOLD = 1;      // 設定為 1 次，即刻觸發告警
+// --------- MQTT 資訊 ---------
+let client;
+let connectMQTT = false;
+let mqttUsername = "we1688";
+let mqttPassword = "aio_QPfP05UOUn7pTKEh6Qjp9EIPQ9Mh"; 
+let mqttTopic = mqttUsername + "/feeds/alarm";
 
-  // 取得目前的臉部特徵點資料（適配 inputs: 1044）
-  function getCurrentData() {
-    let inputData = [];
-    if (predictions.length > 0 && predictions[0].scaledMesh) {
-      const mesh = predictions[0].scaledMesh;
-      for (let j = 0; j < mesh.length; j++) {
-        for (let k = 0; k < mesh[j].length; k++) {
-          inputData.push(mesh[j][k]);
-        }
-      }
-    }
-    // 截取或補齊資料，確保陣列長度嚴格等於 1044
-    return inputData.slice(0, 1044);
-  }
+// --------- 效能與防誤判機制設定 ---------
+let isPredicting = false;       // 神經網路推論鎖（防止請求堆疊）
+let drowsyCounter = 0;          // 打瞌睡連續幀數計數器
+const DROWSY_THRESHOLD = 1;     // 連續偵測到 N 次打瞌睡才觸發告警（防眨眼誤判）
 
-  // 進行預測分類
-  function predictData() {
-    let data = getCurrentData();
-    if (data.length === 1044) {
-      isPredicting = true; // 上鎖，避免重複推論卡頓
-      nn.classify([data], gotResults);
-    }
-  }
-
-  // 取得分類結果
-  function gotResults(error, results) {
-    isPredicting = false; // 解鎖
-
-    if (error) {
-      console.log('分類發生錯誤:', error);
-      return;
-    }
-    
-    if (results && results.length > 0) {
-      let rawLabel = results[0].label;
-      
-      // 1 次判定機制
-      if (rawLabel === "打瞌睡") {
-        drowsyCounter++;
-        if (drowsyCounter >= DROWSY_THRESHOLD) {
-          predictLabel = "打瞌睡";
-        }
-      } else {
-        drowsyCounter = 0;
-        predictLabel = "清醒";
-      }
-
-      console.log("預測結果：" + predictLabel);
-    }
-  }
-
-  // ---------- 上傳與載入模型 ----------
-  function uploadModel() {
-    const modelInfo = {
-      model: 'model.json',
-      metadata: 'model_meta.json',
-      weights: 'model.weights.bin',
-    };
-    nn.load(modelInfo, modelLoaded);
-    loading = true;
-  }
-
-  function modelLoaded() {
-    console.log("分類器模型載入完成");
-    loading = false;
-  }
-
-  // 繪製臉部特徵點
-  function drawKeypoints() {
-    if (predictions.length === 0) return;
-
-    fill(100, 255, 100);
-    noStroke();
-    
-    for (let i = 0; i < predictions.length; i++) {
-      const keypoints = predictions[i].scaledMesh;
-      for (let j = 0; j < keypoints.length; j++) {
-        const [x, y] = keypoints[j];
-        if (x >= 0 && x <= videoSizeW && y >= 0 && y <= videoSizeH) {
-          ellipse(x, y, 3, 3);
-        }
+// 取得目前的臉部特徵點資料
+function getCurrentData() {
+  let inputData = [];
+  if (predictions.length > 0 && predictions[0].scaledMesh) {
+    const mesh = predictions[0].scaledMesh;
+    for (let j = 0; j < mesh.length; j++) {
+      for (let k = 0; k < mesh[j].length; k++) {
+        inputData.push(mesh[j][k]);
       }
     }
   }
+  return inputData;
+}
 
-  function faceModelReady() {
-    console.log("FaceMesh 模型讀取完畢");
-    facemesh.on("predict", gotFaceResult);
-    uploadModel(); 
+// 進行預測分類
+
+// 進行預測分類
+function predictData() {
+  nn.classify([getCurrentData()], gotResults)
+}
+
+
+// 確認狀態
+function checkStatus(){
+  // 如果狀態變更
+  if(predictLabel != lastLabel){
+    // 傳送目前狀態
+    client.publish(mqttTopic, predictLabel);
   }
+  lastLabel = predictLabel;
+}
 
-  function gotFaceResult(faceResults) {
-    predictions = faceResults;
-    // 當前沒有在推論且模型已載入完成時才發起預測
-    if (predictions.length > 0 && !loading && !isPredicting) {
-      predictData();
-    }
+
+// 取得結果 + 確認狀態
+function gotResults(error, results) {
+  if (error) {
+    console.log('發生錯誤')
   }
-
-  // ---------- p5.js 主程序 ----------
-  function setup() {
-    createCanvas(videoSizeW, videoSizeH);
-    
-    video = createCapture(VIDEO);
-    video.size(videoSizeW, videoSizeH);
-    video.hide(); 
-
-    const options = {
-      inputs: 1044,
-      outputs: 2,
-      task: 'classification',
-      debug: false
-    };
-    nn = ml5.neuralNetwork(options);
-
-    loading = true;
-    facemesh = ml5.facemesh(video, faceModelReady);
+  else{
+    predictLabel = results[0].label;
+    console.log("預測結果：" + predictLabel);
+    checkStatus();    // 確認狀態
   }
+}
 
-  function draw() {
-    // 繪製視訊畫面
-    image(video, 0, 0, videoSizeW, videoSizeH);
-      
-    // 繪製臉部偵測關鍵點
-    drawKeypoints();   
-    
-    // 瞌睡警報與畫面 UI
-    textAlign(CENTER, CENTER);
-    if (predictLabel == "打瞌睡") {
-      fill(255, 255, 255);
-      textSize(64);
-      text("請保持清醒！", width / 2, height / 3);
-      tint(255, 50, 50); // 打瞌睡時呈現紅色濾鏡警示
-    } 
-    else if (loading) {
-      fill(255, 255, 255);
-      textSize(42);
-      text("模型讀取中...", width / 2, height / 3);
-      tint(100, 100, 100);    
-    } else {
-      tint(255);    
-    } 
-  }
 
-  // ================= 輔助 UI 與圖表函式庫（完整保留） =================
-  let xOrigin, yOrigin;
-  let xPixels, yPixels;
-  let xStep, yStep;
-  let xStart, yStart;
-  let txtSize;
-
-  function drawCircledNum(x, y, r, cr, cg, cb, txtSize, num, xOff, yOff) {
-    fill(cr, cg, cb);
-    circle(x, y, r);
-    textSize(txtSize);
-    fill(255, 255, 255);
-    textAlign(CENTER, CENTER);
-    text(num, x + xOff, y + yOff);
-  }
-
-  function drawChart(_xOrigin, _yOrigin, _xPixels, _yPixels, _xStep, _yStep, _xStart, _yStart, _txtSize) {
-    xOrigin = _xOrigin;
-    yOrigin = _yOrigin;
-    xPixels = _xPixels;
-    yPixels = _yPixels;
-    xStep = _xStep;
-    yStep = _yStep;
-    xStart = _xStart;
-    yStart = _yStart;
-    txtSize = _txtSize;
-
-    textSize(txtSize);
-    for (let x = xOrigin, v = xStart; x <= width - xPixels; x += xPixels, v += xStep) {
-      text(v, x - txtSize / 2, yOrigin + txtSize);
-      line(x, yOrigin, x, 0);
-    }
-    for (let y = yOrigin, v = yStart; y >= yPixels; y -= yPixels, v += yStep) {
-      text(v, xOrigin - txtSize * 2, y + txtSize / 2);
-      line(xOrigin, y, width, y);
-    }
-  }
-
-  function drawPoint(x, y, sz) {
-    x = int(((x - xStart) * xPixels) / xStep) + xOrigin;
-    y = yOrigin - int(((y - yStart) * yPixels) / yStep);
-    ellipse(x, y, sz, sz);
-  }
-
-  function drawRectangle(x, y, sz) {
-    x = int(((x - xStart) * xPixels) / xStep) + xOrigin;
-    y = yOrigin - int(((y - yStart) * yPixels) / yStep);
-    noStroke();
-    rectMode(CENTER);
-    rect(x, y, sz, sz);
-  }
-
-  function guiImgButton(src, x, y, sz, cb, alt) {
-    alt = (alt === undefined) ? "" : alt;
-    let btn = createImg(src, alt);
-    btn.position(x, y);
-    btn.size(sz, sz);
-    btn.mousePressed(cb);
-  }
-
-  function xFlip(video) {
-    push();
-    translate(video.width, 0);
-    scale(-1, 1);
-    image(video, 0, 0, 640, 480);
-    pop();
-  }
-
-  function guiSlider(minVal, maxVal, sz, step) {
-    sz = (sz === undefined) ? 640 : sz;
-    step = (step === undefined) ? 1 : step;
-    let slider = createSlider(minVal, maxVal, (minVal + maxVal) / 2, step);
-    slider.style("width", sz + "px");
-    return slider;
-  }
-
-  let btnP = null;
-  function guiButton(lab, fun, sz) {
-    sz = (sz === undefined) ? 20 : sz;
-    let btn = createButton(lab);
-    btn.size(100, 50);
-    btn.style("font-size", sz + "px");
-    if (!btnP) btnP = createP();
-    btnP.child(btn);
-    btn.mousePressed(fun);
-    return btn;
-  }
-
-  function guiText(txt, sz) {
-    sz = (sz === undefined) ? 24 : sz;
-    let p = createP(txt);
-    p.style("font-size", sz + "px");
-    return p;
-  }
-
-  let snapshotBars = {
-    bars: [],
-    addBar: (y, r, g, b, w, h) => {
-      snapshotBars.bars.push({ y: y, w: w, h: h, count: 0 });
-      fill(r, g, b);
-      rect(0, y, width, h * 2, 5);
-      return snapshotBars.bars.length - 1;
-    },
-    count: (n) => {
-      return snapshotBars.bars[n].count;
-    },
-    addSnapshot: (img, n) => {
-      let y = snapshotBars.bars[n].y;
-      let w = snapshotBars.bars[n].w;
-      let h = snapshotBars.bars[n].h;
-      let count = snapshotBars.bars[n].count;
-      let nSnaps = int(width / w);
-      let row = int(count / nSnaps) % 2;
-      let col = count % nSnaps;
-      image(img, col * w, y + row * h, w, h);
-      snapshotBars.bars[n].count++;
-    },
+// ---------- 上傳模型 ----------
+function uploadModel() {
+  const modelInfo = {
+    model: 'model.json',
+    metadata: 'model_meta.json',
+    weights: 'model.weights.bin',
   };
-  </script>
+  nn.load(modelInfo, modelLoaded);
+  loading = true;
+}
+
+function modelLoaded() {
+  console.log("分類器模型載入完成");
+  loading = false;
+}
+
+// 繪製臉部特徵點
+function drawKeypoints() {
+  if (predictions.length === 0) return;
+
+  fill(100, 255, 100);
+  noStroke();
   
+  for (let i = 0; i < predictions.length; i++) {
+    const keypoints = predictions[i].scaledMesh;
+    for (let j = 0; j < keypoints.length; j++) {
+      const [x, y] = keypoints[j];
+      if (x >= 0 && x <= videoSizeW && y >= 0 && y <= videoSizeH) {
+        ellipse(x, y, 3, 3);
+      }
+    }
+  }
+}
+
+function faceModelReady() {
+  console.log("FaceMesh 模型讀取完畢");
+  facemesh.on("predict", gotFaceResult);
+  loading = false;
+  uploadModel(); 
+}
+
+function gotFaceResult(faceResults) {
+  predictions = faceResults;
+  if (predictions.length > 0) {
+    predictData();
+  }
+}
+
+// ---------- MQTT 設定 ----------
+function mqttSetup() {
+  let mqttOptions = {
+    username: mqttUsername, // 使用者名稱
+    password: mqttPassword, // 金鑰
+  };
+  client = mqtt.connect("wss://io.adafruit.com:443", mqttOptions);
+  console.log("連線 MQTT 伺服器中...");
+  client.on("connect", mqttConnected);
+}
+
+function mqttConnected() {
+  console.log("已連線 MQTT 伺服器");
+  connectMQTT = true; // 已連接 MQTT 伺服器
+}
+
+// ---------- p5.js 主程序 ----------
+function setup() {
+  // 修復原本 height * 2 導致畫面下方過大的問題
+  createCanvas(videoSizeW, videoSizeH);
+  
+  video = createCapture(VIDEO);
+  video.size(videoSizeW, videoSizeH);
+  video.hide(); 
+
+  const options = {
+    inputs: 1044,
+    outputs: 2,
+    task: 'classification',
+    debug: false // 訓練完成後可設為 false 提升效能
+  };
+  nn = ml5.neuralNetwork(options);
+
+  loading = true;
+  facemesh = ml5.facemesh(video, faceModelReady);
+
+  mqttSetup();
+}
+
+function draw() {
+
+  image(video, 0, 0, videoSizeW, videoSizeH);
+   
+  // 在臉部偵測關鍵點畫上圓形
+  drawKeypoints();   
+  
+  // 瞌睡警報更改畫面色調
+  textAlign(CENTER, CENTER);
+  if (predictLabel == "打瞌睡") {
+    fill(255, 255, 255);
+    textSize(72);
+    text("請保持清醒！", width / 2, height / 3)
+    tint(255, 20, 150);
+  } 
+  // 模型讀取中
+  else if (loading){
+    fill(255, 255, 255);
+    textSize(48);
+    text("讀取中...", width / 2, height / 3)
+    tint(100, 100, 100);    
+  }  else {
+    tint(255);    
+  } 
+}
+let xOrigin, yOrigin; // 圖表原點位置
+let xPixels, yPixels; // 圖表 XY 軸刻度間距像素
+let xStep, yStep; // 圖表 XY 軸刻度值間隔
+let xStart, yStart; // 圖表 XY 軸刻度值啟始值
+let txtSize; // 圖表刻度文字大小
+
+// 繪製圓形數值
+function drawCircledNum(
+  x,         // 圓心及半徑
+  y,
+  r, 
+  cr,        // 填色
+  cg,
+  cb, 
+  txtSize,   // 文字大小
+  num,       // 數值
+  xOff,
+  yOff       // 文字偏移
+) {
+  fill(cr, cg, cb);
+  circle(x, y, r);
+  textSize(txtSize);
+  fill(255, 255, 255);
+  textAlign(CENTER, CENTER);
+  text(num, x + xOff, y + yOff);
+}
+
+//----繪製 XY 軸方格圖-----
+function drawChart(
+  _xOrigin,  // 圖表原點位置
+  _yOrigin, 
+  _xPixels,  // XY 軸刻度間距像素
+  _yPixels,  
+  _xStep,    // XY 軸刻度值間隔
+  _yStep, 
+  _xStart,   // XY 軸刻度值啟始值
+  _yStart, 
+  _txtSize   // 刻度文字大小
+) {
+  xOrigin = _xOrigin;
+  yOrigin = _yOrigin;
+  xPixels = _xPixels;
+  yPixels = _yPixels;
+  xStep = _xStep;
+  yStep = _yStep;
+  xStart = _xStart;
+  yStart = _yStart;
+  txtSize = _txtSize;
+
+  textSize(txtSize);
+  // 標出 X 軸數值
+  for (
+    let x = xOrigin, v = xStart;
+    x <= width - xPixels;
+    x += xPixels, v += xStep
+  ) {
+    text(v, x - txtSize / 2, yOrigin + txtSize);
+    // 畫出 Y 軸線
+    line(x, yOrigin, x, 0);
+  }
+  // 標出 Y 軸數值
+  for (let y = yOrigin, v = yStart; y >= yPixels; y -= yPixels, v += yStep) {
+    text(v, xOrigin - txtSize * 2, y + txtSize / 2);
+    // 畫出 X 軸線
+    line(xOrigin, y, width, y);
+  }
+}
+
+// 在圖表上指定座標繪製半徑 10 像素的圓點
+function drawPoint(x, y, sz) {
+  x = int(((x - xStart) * xPixels) / xStep) + xOrigin;
+  y = yOrigin - int(((y - yStart) * yPixels) / yStep);
+  ellipse(x, y, sz, sz);
+}
+
+function drawRectangle(x, y, sz) {
+  x = int(((x - xStart) * xPixels) / xStep) + xOrigin;
+  y = yOrigin - int(((y - yStart) * yPixels) / yStep);
+  noStroke();
+  rectMode(CENTER);
+  rect(x, y, sz, sz);
+}
+
+//-----在指定位置繪製圖片按鈕-----
+function guiImgButton(
+  src, // 圖檔來源
+  x,   // 按鈕位置
+  y,   
+  sz,  // 按鈕大小
+  cb,  // 事件處理函式
+  alt  // 替代文字
+) {
+  alt = (alt === undefined) ? "" : alt;
+  btn = createImg(src, alt);
+  btn.position(x, y);
+  btn.size(sz, sz);
+  btn.mousePressed(cb);
+}
+
+// 畫面左右翻轉
+function xFlip(video) {
+  push(); // 開始新的畫圖狀態(避免文字也被翻轉)
+  // 將起始點更改為右上角
+  translate(video.width, 0);
+  // 根據 X 軸翻轉
+  scale(-1, 1);
+  // (影像, 起始x點, 起始y點, 影像寬度, 影像高度)
+  image(video, 0, 0, 640, 480);
+  pop(); // 恢復舊的畫圖狀態(避免文字也被翻轉)
+}
+
+function guiSlider(minVal, maxVal, sz, step) {
+  sz = (sz === undefined) ? 640:sz;
+  step = (step === undefined) ? 1:step;
+  // 建立滑軌(最小值,最大值,間距)
+  slider = createSlider(minVal, maxVal, (minVal + maxVal) / 2, step);
+  slider.style("width", sz + "px");
+  return slider;
+}
+
+let btnP = null;
+function guiButton(lab, fun, sz) {
+  sz = (sz === undefined) ? 20:sz;
+  let btn = createButton(lab);
+  btn.size(100, 50);
+  btn.style("font-size", sz + "px");
+  if (!btnP) btnP = createP();
+  btnP.child(btn);
+  btn.mousePressed(fun);
+  return btn;
+}
+
+function guiText(txt, sz) {
+  sz = (sz === undefined) ? 24:sz;
+
+  // 創建 文字
+  let p = createP(txt);
+  p.style("font-size", sz + "px");
+  return p;
+}
+
+let snapshotBars = {
+  bars: [],
+  addBar: (y, r, g, b, w, h) => {
+    snapshotBars.bars.push({
+      y: y,
+      w: w,
+      h: h,
+      count: 0,
+    }); // w, h, count
+    fill(r, g, b);
+    rect(0, y, width, h * 2, 5);
+    return snapshotBars.bars.length - 1;
+  },
+  count: (n) => {
+    return snapshotBars.bars[n].count;
+  },
+  addSnapshot: (img, n) => {
+    y = snapshotBars.bars[n].y;
+    w = snapshotBars.bars[n].w;
+    h = snapshotBars.bars[n].h;
+    count = snapshotBars.bars[n].count;
+    let nSnaps = int(width / w); // 每列縮圖數
+    let row = int(count / nSnaps) % 2;
+    let col = count % nSnaps;
+    image(img, col * w, y + row * h, w, h);
+    snapshotBars.bars[n].count++;
+  },
+};
+ 
+  </script>
   <body>    
   </body>
 </html>
