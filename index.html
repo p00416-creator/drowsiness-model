@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>防瞌睡偵測系統1133</title>
+    <title>防瞌睡偵測系統1152</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/0.9.0/p5.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/0.9.0/addons/p5.dom.min.js"></script>
     <script src="https://unpkg.com/ml5@0.6.1/dist/ml5.min.js" type="text/javascript"></script>
@@ -103,8 +103,8 @@
 
   <body>
     <header>
-      <h1>Nod off Alarm</h1>
-      <p>AI 駕駛與專注力打瞌睡即時偵測</p>
+      <h1>AI駕駛與專注力打瞌睡即時偵測1152</h1>
+      <p>AI駕駛與專注力打瞌睡即時偵測</p>
     </header>
 
     <div class="main-container" id="canvas-container">
@@ -147,29 +147,26 @@
       nn.classify([getCurrentData()], gotResults);
     }
 
-   
-// 確認狀態
-function checkStatus(){
-  // 如果狀態變更
-  if(predictLabel != lastLabel){
-    // 傳送目前狀態
-    client.publish(mqttTopic, predictLabel);
-  }
-  lastLabel = predictLabel;
-}
+    // 確認狀態
+    function checkStatus(){
+      // 如果狀態變更
+      if(predictLabel != lastLabel){
+        // 傳送目前狀態（此處已移除 MQTT，保留空邏輯避免報錯）
+      }
+      lastLabel = predictLabel;
+    }
 
-
-// 取得結果 + 確認狀態
-function gotResults(error, results) {
-  if (error) {
-    console.log('發生錯誤')
-  }
-  else{
-    predictLabel = results[0].label;
-    console.log("預測結果：" + predictLabel);
-    checkStatus();    // 確認狀態
-  }
-}
+    // 取得結果 + 確認狀態
+    function gotResults(error, results) {
+      if (error) {
+        console.log('發生錯誤')
+      }
+      else{
+        predictLabel = results[0].label;
+        console.log("預測結果：" + predictLabel);
+        checkStatus();    // 確認狀態
+      }
+    }
 
     // ---------- 上傳模型 ----------
     function uploadModel() {
@@ -187,18 +184,27 @@ function gotResults(error, results) {
       loading = false;
     }
 
-    // 繪製臉部特徵點
+    // 繪製臉部特徵點（修復偏位問題：對齊 Video 實體渲染區域）
     function drawKeypoints() {
-      if (predictions.length === 0) return;
+      if (predictions.length === 0 || !video) return;
 
       fill(100, 255, 100);
       noStroke();
       
+      // 計算實際 video 輸入比例相對於 canvas 的縮放倍率
+      let scaleX = width / (video.elt.videoWidth || videoSizeW);
+      let scaleY = height / (video.elt.videoHeight || videoSizeH);
+
       for (let i = 0; i < predictions.length; i++) {
         const keypoints = predictions[i].scaledMesh;
         for (let j = 0; j < keypoints.length; j++) {
-          const [x, y] = keypoints[j];
-          if (x >= 0 && x <= videoSizeW && y >= 0 && y <= videoSizeH) {
+          let [x, y] = keypoints[j];
+          
+          // 自動校正縮放
+          x = x * scaleX;
+          y = y * scaleY;
+
+          if (x >= 0 && x <= width && y >= 0 && y <= height) {
             ellipse(x, y, 3, 3);
           }
         }
@@ -221,7 +227,6 @@ function gotResults(error, results) {
 
     // ---------- p5.js 主程序 ----------
     function setup() {
-      // 修復原本 height * 2 導致畫面下方過大的問題
       let cnv = createCanvas(videoSizeW, videoSizeH);
       cnv.parent('canvas-container'); // 將畫布置入美化容器內
       
