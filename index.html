@@ -103,7 +103,7 @@
 
   <body>
     <header>
-      <h1>AI駕駛與專注力打瞌睡即時偵測1152</h1>
+      <h1>AI駕駛與專注力打瞌睡即時偵測1226</h1>
       <p>AI駕駛與專注力打瞌睡即時偵測</p>
     </header>
 
@@ -202,9 +202,8 @@
     function checkStatus(){
       // 如果狀態變更，發送至 GAS
       if(predictLabel != lastLabel){
-        sendToGAS(predictLabel);
-      }
-      lastLabel = predictLabel;
+        lastLabel = predictLabel;
+      }      
     }
 
     // 取得結果 + 防誤判緩衝處理
@@ -221,6 +220,7 @@
           // 當連續判定打瞌睡達到閥值，才確認為打瞌睡
           if (drowsyCounter >= DROWSY_THRESHOLD) {
             predictLabel = "打瞌睡";
+            sendToGAS(predictLabel);
           }
         } else {
           // 只要出現清醒（或眨眼結束），修復誤判，立即重置計數並切回清醒
