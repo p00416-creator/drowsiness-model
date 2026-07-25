@@ -142,10 +142,9 @@
 </head>
 <body>
 
-  <h1 class="header-title">🚨 駕駛疲勞偵測與緊急警報系統</h1>
+  <h1 class="header-title">🚨 駕駛疲勞偵測與緊急警報系統0932</h1>
 
   <div class="main-container">
-    <!-- 儀表板卡片 -->
     <div class="dashboard-grid">
       <div class="status-card">
         <span class="status-title">當前生理狀態</span>
@@ -165,42 +164,34 @@
       </div>
     </div>
 
-    <!-- p5 Canvas 畫布放置區 -->
     <div id="canvas-container" class="canvas-wrapper"></div>
 
-    <!-- 即時日誌 -->
     <div class="log-container" id="log-box">
       <div class="log-item"><span class="log-time">[系統]</span> 啟動中，正在請求相機與 GPS 權限...</div>
     </div>
   </div>
 
   <script>
-    // ==========================================
-    // ⚙️ 前端系統設定
-    // ==========================================
-    // 請將下方 Replace 換成您發布的 GAS Web App 部署網址
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbzR-0dO8nyrTmckOUljWXDD8whv9hJMPxmgRJaBzqZBUgR5zPt52Og26LgbGh1vCjSCZQ/exec"; 
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbx_YOUR_DEPLOYMENT_ID_HERE/exec"; 
 
     let video;
     let facemesh;
-    let predictLabel = "清醒";       // 當前預測結果
-    let predictions = [];           // 人臉關鍵點
-    let nn;                         // 神經網路
-    let loading = true;             // 載入狀態
-    let lastLabel = "";             // 上一次同步至 GAS 的狀態
+    let predictLabel = "清醒";
+    let predictions = [];
+    let nn;
+    let loading = true;
+    let lastLabel = "";
 
     const videoSizeW = 640;
     const videoSizeH = 480;
 
-    let isPredicting = false;       // 防重複推論鎖
-    let drowsyCounter = 0;          // 打瞌睡連續幀數計數器
-    const DROWSY_THRESHOLD = 3;     // 判定閾值：連續 3 幀才觸發警報
+    let isPredicting = false;
+    let drowsyCounter = 0;
+    const DROWSY_THRESHOLD = 3;
 
-    // GPS 座標
     let currentLat = "無";
     let currentLng = "無";
 
-    // 介面 Log 控制
     function addLog(msg) {
       const logBox = document.getElementById("log-box");
       const timeStr = new Date().toLocaleTimeString();
@@ -211,9 +202,6 @@
       logBox.scrollTop = logBox.scrollHeight;
     }
 
-    // ==========================================
-    // 📍 取得瀏覽器 GPS 定位
-    // ==========================================
     function initGPS() {
       if ("geolocation" in navigator) {
         navigator.geolocation.watchPosition(
@@ -235,9 +223,6 @@
       }
     }
 
-    // ==========================================
-    // ☁️ 發送資料至 Google Apps Script (doPost)
-    // ==========================================
     function sendToGAS(statusLabel) {
       if (!GAS_URL || GAS_URL.includes("YOUR_DEPLOYMENT_ID")) {
         document.getElementById("gas-status").innerText = "未設定網址";
@@ -253,7 +238,6 @@
         lng: currentLng
       };
 
-      // GAS 重定向需要 follow redirect，以 text/plain 可避免預檢請求問題
       fetch(GAS_URL, {
         method: "POST",
         redirect: "follow",
@@ -274,11 +258,9 @@
         document.getElementById("gas-status").innerText = "失敗";
         document.getElementById("gas-status").style.color = "var(--alert-color)";
         console.error("GAS 傳送失敗:", err);
-        addLog(`❌ GAS 傳送失敗: ${err.message}`);
       });
     }
 
-    // 檢查狀態變更
     function checkStatus() {
       if (predictLabel !== lastLabel) {
         sendToGAS(predictLabel);
@@ -294,7 +276,6 @@
       }
     }
 
-    // 轉換臉部節點資料 (348點 * 3維度 = 1044)
     function getCurrentData() {
       let inputData = [];
       if (predictions.length > 0 && predictions[0].scaledMesh) {
@@ -308,7 +289,6 @@
       return inputData;
     }
 
-    // 神經網路預測
     function predictData() {
       if (isPredicting || predictions.length === 0) return;
 
@@ -329,7 +309,6 @@
       if (results && results.length > 0) {
         let rawLabel = results[0].label;
 
-        // 防眨眼與瞬間晃動誤判
         if (rawLabel === "打瞌睡") {
           drowsyCounter++;
         } else {
@@ -345,7 +324,6 @@
       }
     }
 
-    // 載入自訂分類模型
     function uploadModel() {
       const modelInfo = {
         model: 'model.json',
@@ -375,14 +353,10 @@
       uploadModel();
     }
 
-    // ==========================================
-    // 🎨 p5.js 主程式 (畫布繪製與鏡像校正)
-    // ==========================================
     function setup() {
       const canvas = createCanvas(videoSizeW, videoSizeH);
       canvas.parent("canvas-container");
 
-      // 設置視訊鏡頭與行動裝置支援
       video = createCapture({
         audio: false,
         video: {
@@ -394,7 +368,6 @@
       video.size(videoSizeW, videoSizeH);
       video.hide();
 
-      // 建立分類器模型
       const options = {
         inputs: 1044,
         outputs: 2,
@@ -403,53 +376,57 @@
       };
       nn = ml5.neuralNetwork(options);
 
-      // 啟動 FaceMesh & GPS
       facemesh = ml5.facemesh(video, faceModelReady);
       initGPS();
     }
 
-    // 畫出鏡像校正後的特徵點 (防止特徵點與臉部反向)
+    // =======================================================
+    // 🎯 修正重點 1：即時計算鏡頭與 Canvas 的動態縮放比例
+    // =======================================================
     function drawKeypoints() {
       if (predictions.length === 0) return;
 
-      push();
-      translate(width, 0);
-      scale(-1, 1);
+      // 取得攝影機傳回的真實寬高，若尚未載入則預設 640x480
+      let vW = video.elt.videoWidth || videoSizeW;
+      let vH = video.elt.videoHeight || videoSizeH;
+
+      let scaleX = width / vW;
+      let scaleY = height / vH;
 
       fill(56, 189, 248);
       noStroke();
 
+      // 注意：整張畫布已在 draw() 執行過鏡像翻轉，此處只需進行座標的動態比率轉換
       for (let i = 0; i < predictions.length; i++) {
         const keypoints = predictions[i].scaledMesh;
         for (let j = 0; j < keypoints.length; j++) {
           const [x, y] = keypoints[j];
-          if (x >= 0 && x <= videoSizeW && y >= 0 && y <= videoSizeH) {
-            ellipse(x, y, 3, 3);
-          }
+          let mappedX = x * scaleX;
+          let mappedY = y * scaleY;
+
+          ellipse(mappedX, mappedY, 4, 4);
         }
       }
-      pop();
-    }
-
-    // 繪製鏡像影像
-    function drawMirroredVideo() {
-      push();
-      translate(width, 0);
-      scale(-1, 1);
-      image(video, 0, 0, width, height);
-      pop();
     }
 
     function draw() {
       background(15, 23, 42);
 
-      // 1. 繪製視訊影像
-      drawMirroredVideo();
+      // =======================================================
+      // 🎯 修正重點 2：統一在畫布層進行鏡像 Flip (水平翻轉)
+      // =======================================================
+      push();
+      translate(width, 0);
+      scale(-1, 1);
 
-      // 2. 繪製臉部關鍵點
+      // 1. 繪製鏡像影像
+      image(video, 0, 0, width, height);
+
+      // 2. 繪製精準對齊後的關鍵點
       drawKeypoints();
+      pop();
 
-      // 3. 繪製狀態視覺提示與警報
+      // 3. 繪製狀態警告遮罩 (不受鏡像影響)
       if (loading) {
         fill(0, 0, 0, 180);
         rect(0, 0, width, height);
@@ -458,7 +435,6 @@
         textSize(26);
         text("系統與 AI 模型載入中...", width / 2, height / 2);
       } else if (predictLabel === "打瞌睡") {
-        // 警報紅色半透明遮罩
         fill(239, 68, 68, 80);
         rect(0, 0, width, height);
 
