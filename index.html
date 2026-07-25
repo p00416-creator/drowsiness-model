@@ -142,7 +142,7 @@
 </head>
 <body>
 
-  <h1 class="header-title">🚨 駕駛疲勞偵測與緊急警報系統0958</h1>
+  <h1 class="header-title">🚨 駕駛疲勞偵測與緊急警報系統1004</h1>
 
   <div class="main-container">
     <div class="dashboard-grid">
@@ -187,7 +187,7 @@
 
     let isPredicting = false;
     let drowsyCounter = 0;
-    const DROWSY_THRESHOLD = 3; // 連續 3 次判斷為打瞌睡才觸發警報，防止誤判
+    const DROWSY_THRESHOLD = 1; // 設為 1 即時觸發測試（測試穩定後可調至 2~3）
 
     let currentLat = "無";
     let currentLng = "無";
@@ -280,33 +280,32 @@
       }
     }
 
-    // 🎯 關鍵修復 1：確保 inputData 能正好產出 1044 維度的特徵陣列
+    // 🎯 修復關鍵 1：明確只提取所有 keypoints 的 X, Y 座標 (468 點 * 2 = 936 維，不夠則補 0 至 1044)
     function getCurrentData() {
       let inputData = [];
       if (predictions.length > 0 && predictions[0].scaledMesh) {
         const mesh = predictions[0].scaledMesh;
+        
+        // 抓取每個點的 X 與 Y (排除 Z 軸)
         for (let j = 0; j < mesh.length; j++) {
-          for (let k = 0; k < mesh[j].length; k++) {
-            inputData.push(mesh[j][k]);
-          }
+          inputData.push(mesh[j][0]); // X
+          inputData.push(mesh[j][1]); // Y
         }
       }
 
-      // 如果原始長度超過 1044（如 1404），自動裁切前 1044 個數值
+      // 如果維度不滿 1044（468*2 = 936），後續補零補足至 1044
+      while (inputData.length < 1044) {
+        inputData.push(0);
+      }
+
+      // 若超出 1044，裁切前 1044 個
       if (inputData.length > 1044) {
         inputData = inputData.slice(0, 1044);
-      } 
-      // 如果長度不足 1044，補 0 至 1044 維
-      else if (inputData.length < 1044 && inputData.length > 0) {
-        while (inputData.length < 1044) {
-          inputData.push(0);
-        }
       }
 
       return inputData;
     }
 
-    // 🎯 關鍵修復 2：修正 ml5 分類器呼叫語法與比對邏輯
     function predictData() {
       if (isPredicting || predictions.length === 0 || loading) return;
 
@@ -314,7 +313,6 @@
 
       if (inputData.length === 1044) {
         isPredicting = true;
-        // ml5.js classify 傳入一維陣列 inputData
         nn.classify(inputData, gotResults);
       }
     }
@@ -327,8 +325,10 @@
       }
 
       if (results && results.length > 0) {
-        // 取得最高信心度的標籤 (模型標籤: 打瞌睡 / 清醒)
         let rawLabel = results[0].label;
+        let confidence = (results[0].confidence * 100).toFixed(1);
+
+        console.log(`[AI 判定] 標籤: ${rawLabel} (${confidence}%)`);
 
         if (rawLabel === "打瞌睡") {
           drowsyCounter++;
@@ -337,7 +337,6 @@
           predictLabel = "清醒";
         }
 
-        // 當連續滿足計數閥值時，判定為打瞌睡
         if (drowsyCounter >= DROWSY_THRESHOLD) {
           predictLabel = "打瞌睡";
         }
@@ -352,6 +351,8 @@
         metadata: 'model_meta.json',
         weights: 'model.weights.bin',
       };
+      
+      addLog("正在載入自訂神經網路模型 (model.json)...");
       nn.load(modelInfo, modelLoaded);
     }
 
@@ -366,6 +367,8 @@
 
     function faceModelReady() {
       console.log("FaceMesh 模型讀取完畢");
+      addLog("FaceMesh 鏡頭偵測模型載入成功");
+      
       facemesh.on("predict", (results) => {
         predictions = results;
         if (predictions.length > 0) {
