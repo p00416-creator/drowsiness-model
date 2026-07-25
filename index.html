@@ -142,7 +142,7 @@
 </head>
 <body>
 
-  <h1 class="header-title">🚨 駕駛疲勞偵測與緊急警報系統0945</h1>
+  <h1 class="header-title">🚨 駕駛疲勞偵測與緊急警報系統0958</h1>
 
   <div class="main-container">
     <div class="dashboard-grid">
@@ -187,12 +187,11 @@
 
     let isPredicting = false;
     let drowsyCounter = 0;
-    const DROWSY_THRESHOLD = 3;
+    const DROWSY_THRESHOLD = 3; // 連續 3 次判斷為打瞌睡才觸發警報，防止誤判
 
     let currentLat = "無";
     let currentLng = "無";
 
-    // ✅ 優化：限制 Log 數量，防止長期執行造成瀏覽器記憶體洩漏
     function addLog(msg) {
       const logBox = document.getElementById("log-box");
       const timeStr = new Date().toLocaleTimeString();
@@ -201,7 +200,6 @@
       newLog.innerHTML = `<span class="log-time">[${timeStr}]</span> ${msg}`;
       logBox.appendChild(newLog);
       
-      // 超過 50 條時自動移除舊紀錄
       if (logBox.children.length > 50) {
         logBox.removeChild(logBox.firstChild);
       }
@@ -267,7 +265,6 @@
       });
     }
 
-    // ✅ 優化：修正 ClassName 寫法，確保 CSS 警報樣式能正確載入
     function checkStatus() {
       if (predictLabel !== lastLabel) {
         sendToGAS(predictLabel);
@@ -283,6 +280,7 @@
       }
     }
 
+    // 🎯 關鍵修復 1：確保 inputData 能正好產出 1044 維度的特徵陣列
     function getCurrentData() {
       let inputData = [];
       if (predictions.length > 0 && predictions[0].scaledMesh) {
@@ -293,16 +291,31 @@
           }
         }
       }
+
+      // 如果原始長度超過 1044（如 1404），自動裁切前 1044 個數值
+      if (inputData.length > 1044) {
+        inputData = inputData.slice(0, 1044);
+      } 
+      // 如果長度不足 1044，補 0 至 1044 維
+      else if (inputData.length < 1044 && inputData.length > 0) {
+        while (inputData.length < 1044) {
+          inputData.push(0);
+        }
+      }
+
       return inputData;
     }
 
+    // 🎯 關鍵修復 2：修正 ml5 分類器呼叫語法與比對邏輯
     function predictData() {
-      if (isPredicting || predictions.length === 0) return;
+      if (isPredicting || predictions.length === 0 || loading) return;
 
       let inputData = getCurrentData();
+
       if (inputData.length === 1044) {
         isPredicting = true;
-        nn.classify([inputData], gotResults);
+        // ml5.js classify 傳入一維陣列 inputData
+        nn.classify(inputData, gotResults);
       }
     }
 
@@ -314,6 +327,7 @@
       }
 
       if (results && results.length > 0) {
+        // 取得最高信心度的標籤 (模型標籤: 打瞌睡 / 清醒)
         let rawLabel = results[0].label;
 
         if (rawLabel === "打瞌睡") {
@@ -323,6 +337,7 @@
           predictLabel = "清醒";
         }
 
+        // 當連續滿足計數閥值時，判定為打瞌睡
         if (drowsyCounter >= DROWSY_THRESHOLD) {
           predictLabel = "打瞌睡";
         }
@@ -387,7 +402,6 @@
       initGPS();
     }
 
-    // ✅ 優化：計算 Cover 比例與位移，確保影像與特徵點完美重合不變形
     function drawKeypoints(scaleFactor, offsetX, offsetY) {
       if (predictions.length === 0) return;
 
@@ -409,11 +423,9 @@
     function draw() {
       background(15, 23, 42);
 
-      // 取得視訊原尺寸
       let vW = video.elt.videoWidth || videoSizeW;
       let vH = video.elt.videoHeight || videoSizeH;
 
-      // 計算以 Object-Fit: Cover 模式繪製的倍率與偏移量
       let scaleFactor = Math.max(width / vW, height / vH);
       let renderW = vW * scaleFactor;
       let renderH = vH * scaleFactor;
@@ -421,18 +433,13 @@
       let offsetY = (height - renderH) / 2;
 
       push();
-      // 水平鏡像
       translate(width, 0);
       scale(-1, 1);
 
-      // 繪製非變形畫面
       image(video, offsetX, offsetY, renderW, renderH);
-
-      // 繪製比例完美校正的特徵點
       drawKeypoints(scaleFactor, offsetX, offsetY);
       pop();
 
-      // UI Overlay 提示 (不受鏡像影響)
       if (loading) {
         fill(0, 0, 0, 180);
         rect(0, 0, width, height);
