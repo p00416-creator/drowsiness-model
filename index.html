@@ -3,229 +3,434 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI駕駛打瞌睡即時偵測</title>
-    <!-- 只需載入 p5.js，dom 模組已內建於現代版本中 -->
+    <title>AI 駕駛專注力與打瞌睡即時偵測系統</title>
+    <!-- 字型與 Icon 圖示庫 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- p5.js 與 ml5.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
     <script src="https://unpkg.com/ml5@0.6.1/dist/ml5.min.js" type="text/javascript"></script>
 
     <style>
       :root {
-        --bg-color: #0f172a;
-        --card-bg: #1e293b;
-        --text-color: #f8fafc;
-        --accent-color: #38bdf8;
+        --bg-color: #0b0f19;
+        --card-bg: rgba(22, 30, 46, 0.75);
+        --card-border: rgba(255, 255, 255, 0.08);
+        --text-main: #f1f5f9;
+        --text-sub: #94a3b8;
+        --accent-cyan: #38bdf8;
+        --success-green: #22c55e;
+        --danger-red: #ef4444;
+        --warning-yellow: #f59e0b;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
       }
 
       body {
         background-color: var(--bg-color);
-        color: var(--text-color);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background-image: 
+          radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.12) 0px, transparent 50%),
+          radial-gradient(at 100% 100%, rgba(239, 68, 68, 0.08) 0px, transparent 50%);
+        color: var(--text-main);
+        font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
         min-height: 100vh;
         display: flex;
         flex-direction: column;
         align-items: center;
-        padding: 20px 10px;
-        margin: 0;
+        padding: 24px 12px;
       }
 
-      header { text-align: center; margin-bottom: 20px; }
-      header h1 { font-size: 1.8rem; color: var(--accent-color); }
+      header {
+        text-align: center;
+        margin-bottom: 24px;
+      }
 
-      .main-container {
+      header h1 {
+        font-size: 1.8rem;
+        font-weight: 700;
+        letter-spacing: 1px;
+        background: linear-gradient(135deg, #38bdf8, #818cf8);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+
+      header p {
+        color: var(--text-sub);
+        font-size: 0.9rem;
+        margin-top: 6px;
+      }
+
+      .app-wrapper {
         width: 100%;
         max-width: 680px;
-        background: var(--card-bg);
-        border-radius: 16px;
-        padding: 16px;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
         display: flex;
         flex-direction: column;
+        gap: 16px;
+      }
+
+      .card {
+        background: var(--card-bg);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid var(--card-border);
+        border-radius: 20px;
+        padding: 16px;
+        box-shadow: 0 20px 30px rgba(0, 0, 0, 0.35);
+      }
+
+      .canvas-card {
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        justify-content: center;
         align-items: center;
+        padding: 10px;
+        transition: border-color 0.3s, box-shadow 0.3s;
+      }
+
+      .canvas-card.alert-active {
+        animation: pulse-border 1s infinite alternate;
+      }
+
+      @keyframes pulse-border {
+        0% { border-color: rgba(239, 68, 68, 0.4); box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); }
+        100% { border-color: rgba(239, 68, 68, 0.9); box-shadow: 0 0 40px rgba(239, 68, 68, 0.8); }
       }
 
       canvas {
         width: 100% !important;
         height: auto !important;
         max-width: 640px;
-        border-radius: 12px;
+        border-radius: 14px;
         display: block;
+      }
+
+      .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+
+      @media (max-width: 520px) {
+        .dashboard-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .status-box {
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 14px;
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+
+      .status-box .label {
+        font-size: 0.8rem;
+        color: var(--text-sub);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .status-box .value {
+        font-size: 1.15rem;
+        font-weight: 700;
+        margin-top: 8px;
+      }
+
+      .badge-awake { color: var(--success-green); }
+      .badge-drowsy { color: var(--danger-red); animation: blink 0.8s infinite; }
+      .badge-loading { color: var(--warning-yellow); }
+
+      @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+      }
+
+      footer {
+        text-align: center;
+        color: var(--text-sub);
+        font-size: 0.8rem;
+        margin-top: 20px;
       }
     </style>
   </head>
 
   <body>
     <header>
-      <h1>AI駕駛打瞌睡即時偵測</h1>
+      <h1><i class="fa-solid fa-car-burst"></i> AI 駕駛打瞌睡即時偵測</h1>
+      <p>結合邊緣運算與雲端通報之即時安全防護系統</p>
     </header>
 
-    <div class="main-container" id="canvas-container">
-      <!-- p5.js Canvas 會自動插入至此 -->
+    <div class="app-wrapper">
+      <!-- 畫布顯示區 -->
+      <div class="card canvas-card" id="canvas-container">
+        <!-- p5.js Canvas 會自動插入至此 -->
+      </div>
+
+      <!-- 狀態儀表板 -->
+      <div class="dashboard-grid">
+        <!-- 狀態卡片 1 -->
+        <div class="card status-box">
+          <div class="label"><i class="fa-solid fa-shield-halved"></i> 辨識狀態</div>
+          <div class="value badge-loading" id="ui-status">
+            <i class="fa-solid fa-spinner fa-spin"></i> 載入中
+          </div>
+        </div>
+
+        <!-- 狀態卡片 2 -->
+        <div class="card status-box">
+          <div class="label"><i class="fa-solid fa-stopwatch"></i> 閉眼判定計數</div>
+          <div class="value" id="ui-counter" style="color: var(--accent-cyan);">
+            0 / 3
+          </div>
+        </div>
+
+        <!-- 狀態卡片 3 -->
+        <div class="card status-box">
+          <div class="label"><i class="fa-solid fa-location-dot"></i> GPS 定位資訊</div>
+          <div class="value" id="ui-gps" style="font-size: 0.85rem; word-break: break-all;">
+            定位搜尋中...
+          </div>
+        </div>
+      </div>
     </div>
 
+    <footer>
+      <p>System Powered by p5.js & ml5.js Neural Network</p>
+    </footer>
+
     <script>
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbzR-0dO8nyrTmckOUljWXDD8whv9hJMPxmgRJaBzqZBUgR5zPt52Og26LgbGh1vCjSCZQ/exec";
-    
-    let currentLat = "無", currentLng = "無";
-    let video, facemesh, nn;
-    let predictLabel = "清醒", rawLabel = "清醒", lastLabel = "清醒";
-    let predictions = [];
-    let loading = true;
-    
-    let videoSizeW = 640;
-    let videoSizeH = 480;
+      const GAS_URL = "https://script.google.com/macros/s/AKfycbzR-0dO8nyrTmckOUljWXDD8whv9hJMPxmgRJaBzqZBUgR5zPt52Og26LgbGh1vCjSCZQ/exec";
+      
+      let currentLat = "無", currentLng = "無";
+      let video, facemesh, nn;
+      let predictLabel = "清醒", rawLabel = "清醒", lastLabel = "清醒";
+      let predictions = [];
+      let loading = true;
+      
+      let videoSizeW = 640;
+      let videoSizeH = 480;
 
-    // 防誤判機制
-    let drowsyCounter = 0;
-    const DROWSY_THRESHOLD = 3;
+      // 防誤判機制
+      let drowsyCounter = 0;
+      const DROWSY_THRESHOLD = 3;
 
-    function initGeolocation() {
-      if ("geolocation" in navigator) {
-        navigator.geolocation.watchPosition(
-          (position) => {
-            currentLat = position.coords.latitude;
-            currentLng = position.coords.longitude;
-          },
-          (err) => console.log("GPS 錯誤: ", err.message),
-          { enableHighAccuracy: true }
-        );
+      // DOM UI 元素參考
+      const uiStatus = document.getElementById("ui-status");
+      const uiCounter = document.getElementById("ui-counter");
+      const uiGps = document.getElementById("ui-gps");
+      const canvasCard = document.getElementById("canvas-container");
+
+      // 語音警報控制
+      let lastAudioTime = 0;
+      function playVoiceAlert() {
+        const now = Date.now();
+        // 每 2.5 秒最多播放一次語音，避免重疊發聲
+        if (now - lastAudioTime > 2500) {
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance("警告！請保持清醒！");
+            utterance.lang = "zh-TW";
+            utterance.rate = 1.1;
+            utterance.pitch = 1.2;
+            window.speechSynthesis.speak(utterance);
+          }
+          lastAudioTime = now;
+        }
       }
-    }
 
-    function sendToGAS(status) {
-      if (!GAS_URL) return;
-      const payload = { status: status, lat: currentLat, lng: currentLng };
+      function initGeolocation() {
+        if ("geolocation" in navigator) {
+          navigator.geolocation.watchPosition(
+            (position) => {
+              currentLat = position.coords.latitude.toFixed(5);
+              currentLng = position.coords.longitude.toFixed(5);
+              uiGps.innerHTML = `<i class="fa-solid fa-crosshairs" style="color: var(--success-green)"></i> ${currentLat}, ${currentLng}`;
+            },
+            (err) => {
+              console.log("GPS 錯誤: ", err.message);
+              uiGps.innerText = "GPS 未授權/不可用";
+            },
+            { enableHighAccuracy: true }
+          );
+        } else {
+          uiGps.innerText = "瀏覽器不支援 GPS";
+        }
+      }
 
-      fetch(GAS_URL, {
-        method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).then(() => console.log(`🚀 已發送狀態: ${status}`));
-    }
+      function sendToGAS(status) {
+        if (!GAS_URL) return;
+        const payload = { status: status, lat: currentLat, lng: currentLng };
 
-    function getCurrentData() {
-      let inputData = [];
-      if (predictions.length > 0 && predictions[0].scaledMesh) {
-        const mesh = predictions[0].scaledMesh;
-        for (let j = 0; j < mesh.length; j++) {
-          for (let k = 0; k < mesh[j].length; k++) {
-            inputData.push(mesh[j][k]);
+        fetch(GAS_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then(() => console.log(`🚀 已發送狀態通報: ${status}`));
+      }
+
+      function getCurrentData() {
+        let inputData = [];
+        if (predictions.length > 0 && predictions[0].scaledMesh) {
+          const mesh = predictions[0].scaledMesh;
+          for (let j = 0; j < mesh.length; j++) {
+            for (let k = 0; k < mesh[j].length; k++) {
+              inputData.push(mesh[j][k]);
+            }
           }
         }
+        return inputData;
       }
-      return inputData;
-    }
 
-    function predictData() {
-      if(nn && !loading) {
-        nn.classify([getCurrentData()], gotResults);
-      }
-    }
-
-    function gotResults(error, results) {
-      if (error) return;
-      rawLabel = results[0].label;
-      
-      if (rawLabel === "打瞌睡") {
-        drowsyCounter++;
-        if (drowsyCounter >= DROWSY_THRESHOLD) {
-          predictLabel = "打瞌睡";
+      function predictData() {
+        if(nn && !loading) {
+          nn.classify([getCurrentData()], gotResults);
         }
-      } else {
-        drowsyCounter = 0;
-        predictLabel = "清醒";
       }
 
-      if (predictLabel !== lastLabel) {
-        lastLabel = predictLabel;
-        sendToGAS(predictLabel);
-      }
-    }
-
-    function faceModelReady() {
-      console.log("FaceMesh 準備完畢");
-      facemesh.on("predict", results => {
-        predictions = results;
-        predictData();
-      });
-      uploadModel(); 
-    }
-
-    function uploadModel() {
-      const modelInfo = {
-        model: 'model.json',
-        metadata: 'model_meta.json',
-        weights: 'model.weights.bin',
-      };
-      nn.load(modelInfo, () => {
-        console.log("神經網路載入完成");
-        loading = false;
-      });
-    }
-
-    function setup() {
-      let cnv = createCanvas(videoSizeW, videoSizeH);
-      cnv.parent('canvas-container');
-      
-      video = createCapture(VIDEO);
-      video.size(videoSizeW, videoSizeH);
-      video.hide(); 
-
-      initGeolocation();
-
-      const options = {
-        inputs: 1044,
-        outputs: 2,
-        task: 'classification',
-        debug: false
-      };
-      nn = ml5.neuralNetwork(options);
-      facemesh = ml5.facemesh(video, faceModelReady);
-    }
-
-    function draw() {
-      image(video, 0, 0, videoSizeW, videoSizeH);
-      
-      // 繪製臉部網格
-      if (predictions.length > 0) {
-        fill(100, 255, 100);
-        noStroke();
+      function gotResults(error, results) {
+        if (error) return;
+        rawLabel = results[0].label;
         
-        // 1. 動態計算相機畫面長寬縮放比
-        let vW = video.elt.videoWidth || videoSizeW;
-        let vH = video.elt.videoHeight || videoSizeH;
-        let scaleX = width / vW;
-        let scaleY = height / vH;
-
-        let keypoints = predictions[0].scaledMesh;
-        for (let i = 0; i < keypoints.length; i++) {
-          let [x, y] = keypoints[i];
-          
-          // 2. 按實際解析度進行縮放，不對 X 軸做額外翻轉
-          x = x * scaleX;
-          y = y * scaleY;
-          
-          if (x >= 0 && x <= width && y >= 0 && y <= height) {
-            ellipse(x, y, 3, 3);
+        if (rawLabel === "打瞌睡") {
+          drowsyCounter++;
+          if (drowsyCounter >= DROWSY_THRESHOLD) {
+            predictLabel = "打瞌睡";
           }
+        } else {
+          drowsyCounter = 0;
+          predictLabel = "清醒";
+        }
+
+        // 更新 UI 防誤判計數
+        uiCounter.innerText = `${drowsyCounter} / ${DROWSY_THRESHOLD}`;
+
+        // 狀態變更時發送通知
+        if (predictLabel !== lastLabel) {
+          lastLabel = predictLabel;
+          sendToGAS(predictLabel);
+        }
+
+        // 更新面板與語音警報
+        if (predictLabel === "打瞌睡") {
+          uiStatus.className = "value badge-drowsy";
+          uiStatus.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> 打瞌睡中`;
+          canvasCard.classList.add("alert-active");
+          playVoiceAlert();
+        } else {
+          uiStatus.className = "value badge-awake";
+          uiStatus.innerHTML = `<i class="fa-solid fa-circle-check"></i> 清醒專注`;
+          canvasCard.classList.remove("alert-active");
         }
       }
-      
-      textAlign(CENTER, CENTER);
-      if (loading) {
-        fill(255);
-        textSize(48);
-        text("讀取模型中...", width / 2, height / 3);
-        tint(100, 100, 100);    
-      } else if (predictLabel === "打瞌睡") {
-        fill(255);
-        textSize(72);
-        text("請保持清醒！", width / 2, height / 3);
-        tint(255, 20, 150);
-      } else {
-        tint(255);
+
+      function faceModelReady() {
+        console.log("FaceMesh 準備完畢");
+        facemesh.on("predict", results => {
+          predictions = results;
+          predictData();
+        });
+        uploadModel(); 
       }
-    }
+
+      function uploadModel() {
+        const modelInfo = {
+          model: 'model.json',
+          metadata: 'model_meta.json',
+          weights: 'model.weights.bin',
+        };
+        nn.load(modelInfo, () => {
+          console.log("神經網路載入完成");
+          loading = false;
+          uiStatus.className = "value badge-awake";
+          uiStatus.innerHTML = `<i class="fa-solid fa-circle-check"></i> 清醒專注`;
+        });
+      }
+
+      function setup() {
+        let cnv = createCanvas(videoSizeW, videoSizeH);
+        cnv.parent('canvas-container');
+        
+        video = createCapture(VIDEO);
+        video.size(videoSizeW, videoSizeH);
+        video.hide(); 
+
+        initGeolocation();
+
+        const options = {
+          inputs: 1044,
+          outputs: 2,
+          task: 'classification',
+          debug: false
+        };
+        nn = ml5.neuralNetwork(options);
+        facemesh = ml5.facemesh(video, faceModelReady);
+      }
+
+      function draw() {
+        image(video, 0, 0, videoSizeW, videoSizeH);
+        
+        // 繪製科技感臉部網格
+        if (predictions.length > 0) {
+          fill(56, 189, 248);
+          noStroke();
+          
+          let vW = video.elt.videoWidth || videoSizeW;
+          let vH = video.elt.videoHeight || videoSizeH;
+          let scaleX = width / vW;
+          let scaleY = height / vH;
+
+          let keypoints = predictions[0].scaledMesh;
+          for (let i = 0; i < keypoints.length; i++) {
+            let [x, y] = keypoints[i];
+            
+            x = x * scaleX;
+            y = y * scaleY;
+            
+            if (x >= 0 && x <= width && y >= 0 && y <= height) {
+              ellipse(x, y, 3, 3);
+            }
+          }
+        }
+        
+        // HUD Overlay
+        textAlign(CENTER, CENTER);
+        if (loading) {
+          fill(255);
+          textSize(36);
+          text("AI 模型初始化中...", width / 2, height / 2);
+          tint(80, 80, 80);    
+        } else if (predictLabel === "打瞌睡") {
+          // 警告遮罩與文字
+          fill(239, 68, 68, 160);
+          rect(0, 0, width, height);
+
+          fill(255);
+          textSize(54);
+          textFont('Noto Sans TC');
+          textStyle(BOLD);
+          text("⚠️ 請保持清醒！", width / 2, height / 2);
+          tint(255, 100, 100);
+        } else {
+          tint(255);
+        }
+      }
     </script>
   </body>
 </html>
