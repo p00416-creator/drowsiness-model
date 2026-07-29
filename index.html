@@ -152,6 +152,21 @@
         margin-top: 8px;
       }
 
+      /* 地圖超連結樣式 */
+      .status-box a.map-link {
+        color: var(--accent-cyan);
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: opacity 0.2s;
+      }
+
+      .status-box a.map-link:hover {
+        opacity: 0.8;
+        text-decoration: underline;
+      }
+
       .badge-awake { color: var(--success-green); }
       .badge-drowsy { color: var(--danger-red); animation: blink 0.8s infinite; }
       .badge-loading { color: var(--warning-yellow); }
@@ -228,7 +243,7 @@
 
       // 防誤判機制
       let drowsyCounter = 0;
-      const DROWSY_THRESHOLD = 3;
+      const DROWSY_THRESHOLD = 10;
 
       // DOM UI 元素參考
       const uiStatus = document.getElementById("ui-status");
@@ -240,7 +255,6 @@
       let lastAudioTime = 0;
       function playVoiceAlert() {
         const now = Date.now();
-        // 每 2.5 秒最多播放一次語音，避免重疊發聲
         if (now - lastAudioTime > 2500) {
           if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel();
@@ -260,7 +274,18 @@
             (position) => {
               currentLat = position.coords.latitude.toFixed(5);
               currentLng = position.coords.longitude.toFixed(5);
-              uiGps.innerHTML = `<i class="fa-solid fa-crosshairs" style="color: var(--success-green)"></i> ${currentLat}, ${currentLng}`;
+              
+              // Google Maps 連結 URL
+              const mapUrl = `https://www.google.com/maps?q=${currentLat},${currentLng}`;
+              
+              // 更新 UI 並嵌入可點擊的地圖連結
+              uiGps.innerHTML = `
+                <a href="${mapUrl}" target="_blank" class="map-link" title="開啟 Google 地圖查看位置">
+                  <i class="fa-solid fa-crosshairs" style="color: var(--success-green)"></i>
+                  <span>${currentLat}, ${currentLng}</span>
+                  <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.75rem;"></i>
+                </a>
+              `;
             },
             (err) => {
               console.log("GPS 錯誤: ", err.message);
@@ -409,12 +434,12 @@
           }
         }
         
-        // HUD Overlay 文字對齊與繪製修正區塊
+        // HUD Overlay
         if (loading) {
           fill(255);
           textSize(36);
           textFont('sans-serif');
-          textAlign(CENTER, CENTER); // 確保對齊在設定字體之後
+          textAlign(CENTER, CENTER);
           text("AI 模型初始化中...", width / 2, height / 2);
           tint(80, 80, 80);    
         } else if (predictLabel === "打瞌睡") {
@@ -424,10 +449,10 @@
 
           // 警告文字
           fill(255);
-          textSize(48); // 縮小為 48 避免手機版面爆板
-          textFont('sans-serif'); // 使用系統預設無襯線字體，解決 Canvas 自訂字體造成的對齊失效
+          textSize(48);
+          textFont('sans-serif');
           textStyle(BOLD);
-          textAlign(CENTER, CENTER); // ⚠️ 關鍵修正：必須在字體樣式都宣告完畢後，再次設定置中對齊
+          textAlign(CENTER, CENTER);
           text("⚠️ 請保持清醒！", width / 2, height / 2);
           
           tint(255, 100, 100);
