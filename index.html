@@ -228,7 +228,7 @@
 
       // 防誤判機制
       let drowsyCounter = 0;
-      const DROWSY_THRESHOLD = 30;
+      const DROWSY_THRESHOLD = 3;
 
       // DOM UI 元素參考
       const uiStatus = document.getElementById("ui-status");
@@ -409,23 +409,27 @@
           }
         }
         
-        // HUD Overlay
-        textAlign(CENTER, CENTER);
+        // HUD Overlay 文字對齊與繪製修正區塊
         if (loading) {
           fill(255);
           textSize(36);
+          textFont('sans-serif');
+          textAlign(CENTER, CENTER); // 確保對齊在設定字體之後
           text("AI 模型初始化中...", width / 2, height / 2);
           tint(80, 80, 80);    
         } else if (predictLabel === "打瞌睡") {
-          // 警告遮罩與文字
+          // 警告遮罩
           fill(239, 68, 68, 160);
           rect(0, 0, width, height);
 
+          // 警告文字
           fill(255);
-          textSize(54);
-          textFont('Noto Sans TC');
+          textSize(48); // 縮小為 48 避免手機版面爆板
+          textFont('sans-serif'); // 使用系統預設無襯線字體，解決 Canvas 自訂字體造成的對齊失效
           textStyle(BOLD);
+          textAlign(CENTER, CENTER); // ⚠️ 關鍵修正：必須在字體樣式都宣告完畢後，再次設定置中對齊
           text("⚠️ 請保持清醒！", width / 2, height / 2);
+          
           tint(255, 100, 100);
         } else {
           tint(255);
